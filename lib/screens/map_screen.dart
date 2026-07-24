@@ -9,6 +9,10 @@ import '../widgets/app_drawer.dart';
 import '../widgets/geofence_panel.dart';
 import '../services/location_service.dart';
 import '../controllers/map_state_controller.dart';
+import '../services/map_download_service.dart';
+import '../models/download_progress.dart';
+import '../widgets/download_progress_dialog.dart';
+
 
 class OnlineMapScreen extends StatefulWidget {
   const OnlineMapScreen({super.key});
@@ -26,6 +30,9 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
   String? tileDirectory;
   bool isOnline = true;
   final connectivityService = ConnectivityService();
+  final downloader = MapDownloadService();
+  final ValueNotifier<DownloadProgress?> progressNotifier =
+    ValueNotifier(null);
 
   @override
   void initState() {
@@ -81,6 +88,7 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
   @override
   void dispose() {
     positionStream?.cancel();
+    progressNotifier.dispose();
     super.dispose();
   }
 
@@ -126,17 +134,41 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
         padding: const EdgeInsets.all(12),
         child: ElevatedButton(
           onPressed: () async {
-            await TileCacheService.downloadArea(
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => DownloadProgressDialog(
+                progressNotifier: progressNotifier,
+                onCancel: () {
+                  downloader.cancelDownload();
+                },
+              ),
+            );
+            await downloader.downloadArea(
               bounds: mapState.selectedBounds!,
               minZoom: 13,
               maxZoom: 17,
+              onProgress: (progress) {
+                progressNotifier.value = progress;
+              },
             );
+            if (mounted) {
+              Navigator.of(this.context).pop();
+            }
             if (!mounted) return;
-            ScaffoldMessenger.of(this.context).showSnackBar(
-              const SnackBar(
-                  content: Text("Map tile downloaded successfully"),
-              ),
-            );
+            if (downloader.isCancelled) {
+              ScaffoldMessenger.of(this.context).showSnackBar(
+                const SnackBar(
+                  content: Text('Download cancelled'),
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(this.context).showSnackBar(
+                const SnackBar(
+                  content: Text('Map downloaded successfully'),
+                ),
+              );
+            }
              
           },
           child: const Text("Download Area"),

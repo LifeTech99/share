@@ -2,8 +2,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'tile_calculator.dart';
+
 
 class TileCacheService {
   /// Returns the local file for a tile.
@@ -95,27 +94,5 @@ class TileCacheService {
     return '${dir.path}/tiles';
   }
     /// Downloads all tiles within a selected area for a range of zoom levels.
-  static Future<void> downloadArea({
-    required LatLngBounds bounds,
-    required int minZoom,
-    required int maxZoom,
-  }) async {
-    for (int zoom = minZoom; zoom <= maxZoom; zoom++) {
-      final minX = TileCalculator.longitudeToTileX(bounds.west, zoom);
-      final maxX = TileCalculator.longitudeToTileX(bounds.east, zoom);
 
-      final minY = TileCalculator.latitudeToTileY(bounds.north, zoom);
-      final maxY = TileCalculator.latitudeToTileY(bounds.south, zoom);
-
-      for (int x = minX; x <= maxX; x++) {
-        for (int y = minY; y <= maxY; y++) {
-          await downloadTile(
-            zoom: zoom,
-            x: x,
-            y: y,
-          );
-        }
-      }
-    }
-  }
 }

@@ -2,7 +2,6 @@ Current Architecture
 
 Screens
 - MapScreen
-- OfflineMapScreen (temporary)
 
 Services
 - LocationService
