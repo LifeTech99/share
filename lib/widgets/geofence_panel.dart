@@ -74,8 +74,7 @@ class GeofencePanel extends StatelessWidget {
                   geofence.delete();
 
                   refresh();
-
-
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text("Geofence deleted successfully"),

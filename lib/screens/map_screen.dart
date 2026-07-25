@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../services/tile_cache_service.dart';
-//import '../services/tile_calculator.dart';
 import '../services/connectivity_service.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/geofence_panel.dart';
@@ -16,8 +15,7 @@ import '../models/download_progress.dart';
 import '../widgets/download_progress_dialog.dart';
 import '../services/wifi_service.dart';
 import '../geofence/geofence.dart';
-//import '../geofence/map_layers.dart';
-//import '../widgets/geofence_panel.dart';
+import '../geofence/map_layers.dart';
 
 
 class OnlineMapScreen extends StatefulWidget {
@@ -28,7 +26,6 @@ class OnlineMapScreen extends StatefulWidget {
 }
 
 class _OnlineMapScreenState extends State<OnlineMapScreen> {
-  bool selectingArea = false;
   final MapController mapController = MapController();
   final LocationService locationService = LocationService();
   StreamSubscription<Position>? positionStream;
@@ -39,9 +36,6 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
   final downloader = MapDownloadService();
   final ValueNotifier<DownloadProgress?> progressNotifier = ValueNotifier(null);
   LatLng? livestockLocation;
-  LatLngBounds? selectedBounds;
-  bool showGeofencePanel = false;
-  LatLng? currentLocation;
   final WifiService wifi = WifiService();
   bool robotConnected = false;
   bool ledOn = false;
@@ -187,8 +181,11 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
         ],
       ),
       drawer: AppDrawer(
-        onGeoFenceTap: () {
-          mapState.showPanel();
+        onGeoFenceTap: () async {
+          await geofence.startEditing(
+            mapController.camera.center,
+          );
+
           setState(() {});
         },
       ),
@@ -274,58 +271,39 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
                   urlTemplate: '$tileDirectory/{z}/{x}/{y}.png',
                 ),
 
-              if (mapState.selectedBounds != null)
-                PolygonLayer(
-                  polygons: [
-                    Polygon(
-                      points: [
-                        mapState.selectedBounds!.northWest,
-
-                        LatLng(
-                          mapState.selectedBounds!.north,
-                          mapState.selectedBounds!.east,
-                        ),
-
-                        mapState.selectedBounds!.southEast,
-
-                        LatLng(
-                          mapState.selectedBounds!.south,
-                          mapState.selectedBounds!.west,
-                        ),
-                      ],
-                      color: Colors.blue.withValues(alpha: 0.25),
-                      borderColor: Colors.blue,
-                      borderStrokeWidth: 2,
-                    ),
-                  ],
-                ),
-
-              if (mapState.currentLocation != null)
+              MapLayers(
+                geofence: geofence,
+                currentLocation: mapState.currentLocation,
+                selectedBounds: mapState.selectedBounds,
+                refresh: () {
+                  setState(() {});
+                },
+              ),
+              if (livestockLocation != null)
                 MarkerLayer(
                   markers: [
                     Marker(
-                      point: mapState.currentLocation!,
-                      width: 50,
-                      height: 50,
+                      point: livestockLocation!,
+                      width: 60,
+                      height: 60,
                       child: const Icon(
-                        Icons.location_pin,
-                        color: Colors.red,
-                        size: 45,
+                        Icons.pets,
+                        color: Colors.blue,
+                        size: 40,
                       ),
                     ),
                   ],
                 ),
+            ],
+          ),
             GeofencePanel(
-              showGeofencePanel: showGeofencePanel,
+              showGeofencePanel: geofence.showPanel,
               geofence: geofence,
               refresh: () {
                 setState(() {
-                  showGeofencePanel = false;
                 });
               },
             ),
-            ],
-          ),
 
           // Bottom panel goes here
         ],

@@ -7,5 +7,3 @@ void main() async {
   await DatabaseHelper.instance.database;
   runApp(const MyApp());
 }
-
-
