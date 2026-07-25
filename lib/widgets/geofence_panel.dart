@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../geofence/geofence.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/notification_provider.dart';
 
-class GeofencePanel extends StatelessWidget {
+class GeofencePanel extends ConsumerWidget {
   final bool showGeofencePanel;
   final GeofenceController geofence;
   final VoidCallback refresh;
@@ -14,7 +16,7 @@ class GeofencePanel extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 300),
       left: 0,
@@ -28,15 +30,37 @@ class GeofencePanel extends StatelessWidget {
           children: [
             TextButton(
               onPressed: () {
+                final isNew = geofence.savedPoints.isEmpty;
+                geofence.save();
+                if (isNew) {
+                  ref
+                      .read(notificationProvider.notifier)
+                      .log(
+                        LogEventType.boundaryCreated,
+                        "Geofence created successfully",
+                      );
+                } else {
+                  ref
+                      .read(notificationProvider.notifier)
+                      .log(
+                        LogEventType.boundaryAdjusted,
+                        "Geofence adjusted successfully",
+                      );
+                }
                 geofence.cancel();
                 refresh();
               },
               child: const Text("Cancel"),
             ),
-
-            TextButton(
+            ElevatedButton(
               onPressed: () {
                 geofence.save();
+                ref
+                    .read(notificationProvider.notifier)
+                    .log(
+                      LogEventType.boundaryCreated,
+                      "Geofence created successfully",
+                    );
                 refresh();
               },
               child: const Text("Save"),
@@ -72,14 +96,13 @@ class GeofencePanel extends StatelessWidget {
 
                 if (confirm == true) {
                   geofence.delete();
-
+                  ref
+                      .read(notificationProvider.notifier)
+                      .log(
+                        LogEventType.boundaryDeleted,
+                        "Geofence deleted successfully",
+                      );
                   refresh();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Geofence deleted successfully"),
-                    ),
-                  );
                 }
               },
               child: const Text("Delete"),

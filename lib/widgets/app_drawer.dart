@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
+import '../screens/alerts_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   final VoidCallback onGeoFenceTap;
 
-  const AppDrawer({
-    super.key,
-    required this.onGeoFenceTap,
-  });
+  const AppDrawer({super.key, required this.onGeoFenceTap});
 
   @override
   Widget build(BuildContext context) {
@@ -15,24 +13,15 @@ class AppDrawer extends StatelessWidget {
         padding: EdgeInsets.zero,
         children: [
           const DrawerHeader(
-            decoration: BoxDecoration(
-              color: Colors.green,
-            ),
+            decoration: BoxDecoration(color: Colors.green),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.pets,
-                  size: 60,
-                  color: Colors.white,
-                ),
+                Icon(Icons.pets, size: 60, color: Colors.white),
                 SizedBox(height: 10),
                 Text(
                   "Livestock Tracker",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                  ),
+                  style: TextStyle(color: Colors.white, fontSize: 22),
                 ),
               ],
             ),
@@ -68,6 +57,10 @@ class AppDrawer extends StatelessWidget {
             title: const Text("Alerts"),
             onTap: () {
               Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AlertsScreen()),
+              );
             },
           ),
 
