@@ -30,16 +30,37 @@ class GeofencePanel extends ConsumerWidget {
           children: [
             TextButton(
               onPressed: () {
+                final isNew = geofence.savedPoints.isEmpty;
+                geofence.save();
+                if (isNew) {
+                  ref
+                      .read(notificationProvider.notifier)
+                      .log(
+                        LogEventType.boundaryCreated,
+                        "Geofence created successfully",
+                      );
+                } else {
+                  ref
+                      .read(notificationProvider.notifier)
+                      .log(
+                        LogEventType.boundaryAdjusted,
+                        "Geofence adjusted successfully",
+                      );
+                }
                 geofence.cancel();
                 refresh();
               },
               child: const Text("Cancel"),
             ),
-
-            TextButton(
+            ElevatedButton(
               onPressed: () {
                 geofence.save();
-                ref.read(notificationProvider.notifier).logBoundaryCreated();
+                ref
+                    .read(notificationProvider.notifier)
+                    .log(
+                      LogEventType.boundaryCreated,
+                      "Geofence created successfully",
+                    );
                 refresh();
               },
               child: const Text("Save"),
@@ -75,14 +96,13 @@ class GeofencePanel extends ConsumerWidget {
 
                 if (confirm == true) {
                   geofence.delete();
-
+                  ref
+                      .read(notificationProvider.notifier)
+                      .log(
+                        LogEventType.boundaryDeleted,
+                        "Geofence deleted successfully",
+                      );
                   refresh();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Geofence deleted successfully"),
-                    ),
-                  );
                 }
               },
               child: const Text("Delete"),
