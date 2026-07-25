@@ -60,13 +60,22 @@ class MapLayers extends StatelessWidget {
 
             return DragMarker(
               point: point,
-              size: const Size(60, 60),
+              size: const Size(40, 40),
 
               builder: (context, position, isDragging) {
                 return  Center (
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      shape: BoxShape.circle,
+                    ),
+                  
+                  alignment: Alignment.center,
                   child : Container(
-                  width: 20,
-                  height: 20,
+                  width: 22,
+                  height: 22,
                   decoration: BoxDecoration(
                     color: Colors.green,
                     shape: BoxShape.circle,
@@ -75,7 +84,8 @@ class MapLayers extends StatelessWidget {
                       width: 5,
                     ),
                   ),
-                ));
+                ),
+                ),);
               },
 
               onDragUpdate: (details, newPoint) {
@@ -97,16 +107,25 @@ class MapLayers extends StatelessWidget {
         return DragMarker(
           point: handle.position,
 
-          size: const Size(80, 80),
+          size: const Size(40, 40),
 
           builder: (context, position, isDragging) {
             return Center(
               child: Container(
-                width: 10,
-                height: 10,
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.transparent,
+                  shape: BoxShape.circle,
+                ),
+              alignment: Alignment.center,
+              child: Container( 
+                width: 8,
+                height: 8,
               decoration: BoxDecoration(
-                color: Colors.orange,
+                color: Colors.green,
                 shape: BoxShape.circle,
+              ),
               ),
               ),
             );
