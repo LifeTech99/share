@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../geofence/geofence.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/notification_provider.dart';
 
-class GeofencePanel extends StatelessWidget {
+class GeofencePanel extends ConsumerWidget {
   final bool showGeofencePanel;
   final GeofenceController geofence;
   final VoidCallback refresh;
@@ -14,7 +16,7 @@ class GeofencePanel extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 300),
       left: 0,
@@ -37,6 +39,7 @@ class GeofencePanel extends StatelessWidget {
             TextButton(
               onPressed: () {
                 geofence.save();
+                ref.read(notificationProvider.notifier).logBoundaryCreated();
                 refresh();
               },
               child: const Text("Save"),
