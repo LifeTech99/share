@@ -37,15 +37,15 @@ class GeofenceController {
     final nextIndex =
         (index + 1) % points.length;
 
-    const threshold = 0.00005;
+    const threshold = 0.0001;
 
     if (_calculateDistance(points[index], points[previousIndex]) <
             threshold ||
-        _calculateDistance(points[index], points[nextIndex]) <
+          _calculateDistance(points[index], points[nextIndex]) <
             threshold) {
       points.removeAt(index);
     }
-  }
+  } 
 
   List<EdgeHandle> getEdgeHandles() {
     final handles = <EdgeHandle>[];
