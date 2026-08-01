@@ -1,7 +1,10 @@
 // lib/providers/notification_provider.dart
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 import '../database/database_helper.dart';
+import '../main.dart';
 
 enum LogEventType {
   boundaryCreated,
@@ -42,15 +45,37 @@ class NotificationNotifier extends Notifier<List<LogEvent>> {
   }
 
   void log(LogEventType type, String message) async {
-    final event = LogEvent(type: type, message: message);
-    state = [...state, event];
+  final event = LogEvent(type: type, message: message);
 
-    await DatabaseHelper.instance.insertLog(
-      type.name,
-      message,
-      event.timestamp,
-    );
-  }
+  state = [...state, event];
+
+  await DatabaseHelper.instance.insertLog(
+    type.name,
+    message,
+    event.timestamp,
+  );
+
+  const AndroidNotificationDetails androidDetails =
+      AndroidNotificationDetails(
+    'livestock_channel',
+    'Livestock Alerts',
+    channelDescription: 'Notifications for livestock events',
+    importance: Importance.max,
+    priority: Priority.high,
+  );
+
+  const NotificationDetails notificationDetails =
+      NotificationDetails(
+    android: androidDetails,
+  );
+
+  await flutterLocalNotificationsPlugin.show(
+    DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    'Livestock Tracker',
+    message,
+    notificationDetails,
+  );
+}
 
   void logBoundaryCreated() {
     log(LogEventType.boundaryCreated, "Boundary created");
