@@ -154,22 +154,6 @@ class MapLayers extends StatelessWidget {
 
       }).toList(),
     ),
-
-        if (currentLocation != null)
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: currentLocation!,
-                width: 80,
-                height: 80,
-                child: const Icon(
-                  Icons.location_pin,
-                  color: Colors.red,
-                  size: 45,
-                ),
-              ),
-            ],
-          ),
       ],
     );
   }

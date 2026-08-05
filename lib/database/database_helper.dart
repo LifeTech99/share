@@ -2,12 +2,72 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:latlong2/latlong.dart';
 
+
 class DatabaseHelper {
   DatabaseHelper._privateConstructor();
 
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
 
   static Database? _database;
+  
+  
+  Future<void> updateDashboard({
+  required String animalId,
+  required double latitude,
+  required double longitude,
+  required String status,
+  required int battery,
+  required String timestamp,
+  required int geofenceId,
+}) async {
+  final db = await database;
+
+  final data = {
+    "Animal_ID": animalId,
+    "Latitude": latitude,
+    "Longitude": longitude,
+    "Geofence_Status": status,
+    "Timestamp": timestamp,
+    "Battery":battery,
+    "geofence_id": geofenceId,
+  };
+
+  final rows = await db.update(
+    "dashboard",
+    data,
+    where: "Animal_ID = ?",
+    whereArgs: [animalId],
+  );
+
+  if (rows == 0) {
+    await db.insert("dashboard", data);
+  }
+}
+
+  Future<void> insertDashboardHistory({
+  required String animalId,
+  required double latitude,
+  required double longitude,
+  required String status,
+  required int battery,
+  required String timestamp,
+  required int geofenceId,
+}) async {
+  final db = await database;
+
+  await db.insert(
+    "dashboard_history",
+    {
+      "Animal_ID": animalId,
+      "Latitude": latitude,
+      "Longitude": longitude,
+      "Geofence_Status": status,
+      "Battery": battery,
+      "Timestamp": timestamp,
+      "geofence_id": geofenceId,
+    },    
+  );
+}
 
   Future<Map<String, Object?>?> getGeofence() async {
     final db = await database;
@@ -86,6 +146,48 @@ class DatabaseHelper {
     final db = await database;
     return await db.query('logs', orderBy: 'timestamp DESC');
   }
+Future<List<Map<String, Object?>>> getDashboard() async {
+  final db = await database;
+
+  return await db.query(
+    "dashboard",
+    orderBy: "Timestamp DESC",
+  );
+}
+   
+   Future<List<Map<String, Object?>>> getDashboardLast15Days() async {
+  final db = await database;
+
+  return await db.query(
+    "dashboard_history",
+    where:
+        "Timestamp >= datetime('now','-15 day')",
+    orderBy: "Timestamp DESC",
+  );
+}
+ 
+
+ Future<List<Map<String, Object?>>> getDashboardLast30Days() async {
+  final db = await database;
+
+  return await db.query(
+    "dashboard_history",
+    where:
+        "Timestamp >= datetime('now','-30 day')",
+    orderBy: "Timestamp DESC",
+  );
+}
+
+  
+  Future<List<Map<String, Object?>>> getDashboardHistory() async {
+  final db = await database;
+
+  return await db.query(
+    "dashboard_history",
+    orderBy: "Timestamp DESC",
+  );
+}
+
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -123,6 +225,38 @@ class DatabaseHelper {
         FOREIGN KEY (geofence_id) REFERENCES geofence(id)
       )
     ''');
+    
+    await db.execute('''
+      CREATE TABLE dashboard (
+        Animal_ID TEXT PRIMARY KEY,
+        Latitude REAL NOT NULL,
+        Longitude REAL NOT NULL,
+        Geofence_Status TEXT NOT NULL,
+        Timestamp TEXT NOT NULL,
+        Battery INTEGER NOT NULL,
+        geofence_id INTEGER NOT NULL,
+        FOREIGN KEY (geofence_id) REFERENCES geofence(id)
+      )
+    ''');
+
+        await db.execute('''
+      CREATE TABLE dashboard_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Animal_ID TEXT NOT NULL,
+        Latitude REAL NOT NULL,
+        Longitude REAL NOT NULL,
+        Geofence_Status TEXT NOT NULL,
+        Timestamp TEXT NOT NULL,
+        Battery INTEGER NOT NULL,
+        geofence_id INTEGER NOT NULL,
+        FOREIGN KEY (geofence_id) REFERENCES geofence(id)
+      )
+    ''');
+
+    await db.delete(
+      'dashboard_history',
+      where: "Timestamp < datetime('now', '-30 days')",
+    );
 
     await db.execute('''
       CREATE TABLE logs (

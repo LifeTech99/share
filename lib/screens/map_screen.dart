@@ -1,9 +1,13 @@
+import '../services/geofence_service.dart';
+import 'dart:convert';
+import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
+import '../database/database_helper.dart';
 import 'package:latlong2/latlong.dart';
-
+import '../screens/alerts_screen.dart';
 import '../services/tile_cache_service.dart';
 import '../services/connectivity_service.dart';
 import '../widgets/app_drawer.dart';
@@ -19,34 +23,67 @@ import '../geofence/map_layers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/notification_provider.dart';
 
-class OnlineMapScreen extends StatefulWidget {
+class OnlineMapScreen extends ConsumerStatefulWidget {
   const OnlineMapScreen({super.key});
 
   @override
-  State<OnlineMapScreen> createState() => _OnlineMapScreenState();
+  ConsumerState<OnlineMapScreen> createState() =>
+      _OnlineMapScreenState();
 }
 
-class _OnlineMapScreenState extends State<OnlineMapScreen> {
+class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   final MapController mapController = MapController();
   final LocationService locationService = LocationService();
   StreamSubscription<Position>? positionStream;
+  Timer? _refreshTimer;
   final mapState = MapStateController();
   String? tileDirectory;
   bool isOnline = true;
   final connectivityService = ConnectivityService();
   final downloader = MapDownloadService();
   final ValueNotifier<DownloadProgress?> progressNotifier = ValueNotifier(null);
-  LatLng? livestockLocation;
+  Map<String, LatLng> livestockLocations = {};
   final WifiService wifi = WifiService();
   bool robotConnected = false;
   bool ledOn = false;
   final geofence = GeofenceController();
+  Map<String, bool> lastGeofenceStatus = {};
+  Map<String, int> lastBattery = {};
+
+  Future<void> loadLivestockLocations() async {
+  final animals = await DatabaseHelper.instance.getDashboard();
+
+  if (!mounted) return;
+
+  setState(() {
+    livestockLocations.clear();
+
+    for (final animal in animals) {
+      livestockLocations[animal["Animal_ID"] as String] = LatLng(
+        (animal["Latitude"] as num).toDouble(),
+        (animal["Longitude"] as num).toDouble(),
+      );
+    }
+  });
+}
 
   @override
   void initState() {
     super.initState();
+
     loadTileDirectory();
     loadConnectivity();
+    loadLivestockLocations();
+
+
+      _refreshTimer = Timer.periodic(
+    const Duration(seconds: 2),
+    (_) => loadLivestockLocations(),
+  );
+
+
+
+
     listenToLocation();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await geofence.loadGeofence();
@@ -59,41 +96,7 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
       });
       debugPrint('Internet Available: $connected');
     });
-    wifi.messages.listen((msg) {
-      debugPrint("ESP -> $msg");
-      if (msg.startsWith("GPS:")) {
-        final data = msg.substring(4).split(",");
 
-        if (data.length == 2) {
-          final lat = double.tryParse(data[0]);
-          final lng = double.tryParse(data[1]);
-
-          if (lat != null && lng != null) {
-            setState(() {
-              livestockLocation = LatLng(lat, lng);
-            });
-          }
-        }
-      }
-
-      if (msg.contains("CONNECTED")) {
-        setState(() {
-          robotConnected = true;
-        });
-      }
-
-      if (msg.contains("LED:ON")) {
-        setState(() {
-          ledOn = true;
-        });
-      }
-
-      if (msg.contains("LED:OFF")) {
-        setState(() {
-          ledOn = false;
-        });
-      }
-    });
   }
 
   Future<void> loadConnectivity() async {
@@ -124,6 +127,7 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     positionStream?.cancel();
     progressNotifier.dispose();
     wifi.dispose();
@@ -146,51 +150,50 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
           appBar: AppBar(
             title: const Text("Livestock Tracker"),
             actions: [
-              Icon(
-                robotConnected ? Icons.wifi : Icons.wifi_off,
-                color: robotConnected ? Colors.green : Colors.red,
-              ),
-
-              IconButton(
-                icon: const Icon(Icons.link),
-
-                onPressed: () async {
-                  bool ok = await wifi.connect();
-                  if (!context.mounted) return;
-
-                  if (ok) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text("Connected")));
-                  }
-                },
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.lightbulb,
-                  color: ledOn ? Colors.yellow : Colors.grey,
-                ),
-                onPressed: () {
-                  if (!robotConnected) return;
-
-                  if (ledOn) {
-                    wifi.send("LED_OFF");
-                  } else {
-                    wifi.send("LED_ON");
-                  }
-                },
-              ),
-            ],
-          ),
-          drawer: AppDrawer(
-            onGeoFenceTap: () async {
-              await geofence.startEditing(mapController.camera.center);
-
-              setState(() {});
+                        IconButton(
+            icon: Icon(
+              Icons.notifications,
+            ),
+            onPressed:  () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AlertsScreen()),
+              );
             },
           ),
+            ],
+          ),
 
-          floatingActionButton: FloatingActionButton(
+drawer: AppDrawer(
+  robotConnected: robotConnected,
+  ledOn: ledOn,
+  onLedPressed: () {
+    if (!robotConnected) return;
+
+    if (ledOn) {
+      wifi.send("LED_OFF");
+    } else {
+      wifi.send("LED_ON");
+    }
+
+    setState(() {
+      ledOn = !ledOn;
+    });
+  },
+
+  onGeoFenceTap: () async {
+    await geofence.startEditing(mapController.camera.center);
+    setState(() {});
+  },
+),
+
+          floatingActionButton: AnimatedPadding(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            padding: EdgeInsets.only(
+              bottom: geofence.showPanel ? 85 : 0,
+            ),
+            child:  FloatingActionButton(
             child: const Icon(Icons.crop_square),
             onPressed: () {
               final center = mapController.camera.center;
@@ -204,6 +207,7 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
 
               setState(() {});
             },
+          ),
           ),
           bottomNavigationBar: mapState.selectedBounds == null
               ? null
@@ -265,7 +269,8 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
                   initialCenter:
                       mapState.currentLocation ??
                       const LatLng(27.7172, 85.3240),
-                  initialZoom: 16,
+                  initialZoom: 15,
+                  maxZoom: 17,
                 ),
 
                 children: [
@@ -280,6 +285,23 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
                       tileProvider: FileTileProvider(),
                       urlTemplate: '$tileDirectory/{z}/{x}/{y}.png',
                     ),
+                      CurrentLocationLayer(
+  alignPositionOnUpdate: AlignOnUpdate.never,
+  alignDirectionOnUpdate: AlignOnUpdate.never,
+
+  style: LocationMarkerStyle(
+    marker: const DefaultLocationMarker(
+      color: Colors.blue,
+    ),
+
+    markerSize: const Size(24, 24),
+
+    headingSectorColor: Colors.blue.withValues(alpha: 0.4),
+
+    headingSectorRadius: 80,
+
+  ),
+),
 
                   MapLayers(
                     geofence: geofence,
@@ -289,23 +311,67 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
                       setState(() {});
                     },
                   ),
-                  if (livestockLocation != null)
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: livestockLocation!,
-                          width: 60,
-                          height: 60,
-                          child: const Icon(
-                            Icons.pets,
-                            color: Colors.blue,
-                            size: 40,
-                          ),
-                        ),
-                      ],
-                    ),
+                  MarkerLayer(
+  markers: livestockLocations.entries.map((entry) {
+    return Marker(
+      point: entry.value,
+      width: 60,
+      height: 60,
+child: Column(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    // Blue circular marker
+    Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        color: Colors.blue,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white,
+          width: 4,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black38,
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+    ),
+const SizedBox(height: 4),
+    Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 6,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(
+            blurRadius: 3,
+            color: Colors.black26,
+          ),
+        ],
+      ),
+      child: Text(
+        entry.key, // Animal_ID
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+  ],
+)
+    );
+  }).toList(),
+),
                 ],
               ),
+
               GeofencePanel(
                 showGeofencePanel: geofence.showPanel,
                 geofence: geofence,
@@ -313,7 +379,6 @@ class _OnlineMapScreenState extends State<OnlineMapScreen> {
                   setState(() {});
                 },
               ),
-
               // Bottom panel goes here
             ],
           ),

@@ -21,6 +21,10 @@ class AlertsScreen extends ConsumerWidget {
         return Icons.delete;
       case LogEventType.mapDownloaded:
         return Icons.download;
+      case LogEventType.geofence:
+        return Icons.outbond;
+      case LogEventType.battery:
+        return Icons.battery_alert;
     }
   }
 
