@@ -23,7 +23,6 @@ class MapLayers extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-
         if (selectedBounds != null)
           PolygonLayer(
             polygons: [
@@ -52,108 +51,104 @@ class MapLayers extends StatelessWidget {
                 ]
               : [],
         ),
-      if(geofence.isEditing)
-        DragMarkers(
-          markers: geofence.points.asMap().entries.map((entry) {
-            final index = entry.key;
-            final point = entry.value;
+        if (geofence.isEditing)
+          DragMarkers(
+            markers: geofence.points.asMap().entries.map((entry) {
+              final index = entry.key;
+              final point = entry.value;
 
-            return DragMarker(
-              point: point,
-              size: const Size(40, 40),
+              return DragMarker(
+                point: point,
+                size: const Size(40, 40),
 
-              builder: (context, position, isDragging) {
-                return  Center (
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      shape: BoxShape.circle,
+                builder: (context, position, isDragging) {
+                  return Center(
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+
+                      alignment: Alignment.center,
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 5),
+                        ),
+                      ),
                     ),
-                  
-                  alignment: Alignment.center,
-                  child : Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 5,
+                  );
+                },
+
+                onDragUpdate: (details, newPoint) {
+                  geofence.points[index] = newPoint;
+                  refresh();
+                },
+                onDragEnd: (_, _) {
+                  geofence.removeVertexIfNeeded(index);
+                  geofence.activeInsertedVertex = null;
+                  refresh();
+                },
+              );
+            }).toList(),
+          ),
+        if (geofence.isEditing)
+          DragMarkers(
+            markers: geofence.getEdgeHandles().map((handle) {
+              return DragMarker(
+                point: handle.position,
+
+                size: const Size(40, 40),
+
+                builder: (context, position, isDragging) {
+                  return Center(
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                ),);
-              },
+                  );
+                },
 
-              onDragUpdate: (details, newPoint) {
-                geofence.points[index] = newPoint;
-                refresh();
-              },
-              onDragEnd: (_, _) {
-                geofence.removeVertexIfNeeded(index);
-                geofence.activeInsertedVertex = null;
-                refresh();
-              },
-            );
-          }).toList(),
-        ),
-    if(geofence.isEditing)
-      DragMarkers(
-        markers: geofence.getEdgeHandles().map((handle) {
+                onDragStart: (_, _) {
+                  geofence.activeInsertedVertex = geofence.insertVertex(
+                    handle.edgeIndex,
+                  );
+                  refresh();
+                },
 
-        return DragMarker(
-          point: handle.position,
+                onDragUpdate: (_, newPoint) {
+                  final index = geofence.activeInsertedVertex;
+                  if (index != null) {
+                    geofence.points[index] = newPoint;
+                  }
+                  refresh();
+                },
 
-          size: const Size(40, 40),
-
-          builder: (context, position, isDragging) {
-            return Center(
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.transparent,
-                  shape: BoxShape.circle,
-                ),
-              alignment: Alignment.center,
-              child: Container( 
-                width: 8,
-                height: 8,
-              decoration: BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-              ),
-              ),
-              ),
-            );
-          },
-
-          onDragStart: (_, _) {
-              geofence.activeInsertedVertex =
-                geofence.insertVertex(handle.edgeIndex);
-                refresh();
-            },
-          
-          onDragUpdate: (_, newPoint) {
-            final index = geofence.activeInsertedVertex;
-            if (index != null) {
-              geofence.points[index] = newPoint;
-            }
-            refresh();
-},
-        
-          onDragEnd: (_, _) {
-            geofence.activeInsertedVertex = null;
-            refresh();
-          },
-        
-        );
-
-      }).toList(),
-    ),
+                onDragEnd: (_, _) {
+                  geofence.activeInsertedVertex = null;
+                  refresh();
+                },
+              );
+            }).toList(),
+          ),
       ],
     );
   }
