@@ -30,6 +30,13 @@ class GeofencePanel extends ConsumerWidget {
           children: [
             TextButton(
               onPressed: () {
+                geofence.cancel();
+                refresh();
+              },
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () {
                 final isNew = geofence.savedPoints.isEmpty;
                 geofence.save();
                 if (isNew) {
@@ -47,20 +54,6 @@ class GeofencePanel extends ConsumerWidget {
                         "Geofence adjusted successfully",
                       );
                 }
-                geofence.cancel();
-                refresh();
-              },
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                geofence.save();
-                ref
-                    .read(notificationProvider.notifier)
-                    .log(
-                      LogEventType.boundaryCreated,
-                      "Geofence created successfully",
-                    );
                 refresh();
               },
               child: const Text("Save"),

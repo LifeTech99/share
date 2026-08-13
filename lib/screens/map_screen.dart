@@ -1,5 +1,3 @@
-import '../services/geofence_service.dart';
-import 'dart:convert';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -27,8 +25,7 @@ class OnlineMapScreen extends ConsumerStatefulWidget {
   const OnlineMapScreen({super.key});
 
   @override
-  ConsumerState<OnlineMapScreen> createState() =>
-      _OnlineMapScreenState();
+  ConsumerState<OnlineMapScreen> createState() => _OnlineMapScreenState();
 }
 
 class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
@@ -51,21 +48,27 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   Map<String, int> lastBattery = {};
 
   Future<void> loadLivestockLocations() async {
-  final animals = await DatabaseHelper.instance.getDashboard();
+    final animals = await DatabaseHelper.instance.getDashboard();
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  setState(() {
-    livestockLocations.clear();
+    setState(() {
+      livestockLocations.clear();
 
-    for (final animal in animals) {
-      livestockLocations[animal["Animal_ID"] as String] = LatLng(
-        (animal["Latitude"] as num).toDouble(),
-        (animal["Longitude"] as num).toDouble(),
-      );
+      for (final animal in animals) {
+        livestockLocations[animal["Animal_ID"] as String] = LatLng(
+          (animal["Latitude"] as num).toDouble(),
+          (animal["Longitude"] as num).toDouble(),
+        );
+      }
+    });
+  }
+
+  void recenterToMyLocation() {
+    if (mapState.currentLocation != null) {
+      mapController.move(mapState.currentLocation!, mapController.camera.zoom);
     }
-  });
-}
+  }
 
   @override
   void initState() {
@@ -74,17 +77,19 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
     loadTileDirectory();
     loadConnectivity();
     loadLivestockLocations();
+    connectWifi();
 
-
-      _refreshTimer = Timer.periodic(
-    const Duration(seconds: 2),
-    (_) => loadLivestockLocations(),
-  );
-
-
-
+    _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      loadLivestockLocations();
+      if (mounted && robotConnected != wifi.isConnected) {
+        setState(() {
+          robotConnected = wifi.isConnected;
+        });
+      }
+    });
 
     listenToLocation();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await geofence.loadGeofence();
       setState(() {});
@@ -96,7 +101,14 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
       });
       debugPrint('Internet Available: $connected');
     });
+  }
 
+  Future<void> connectWifi() async {
+    final connected = await wifi.connect();
+    if (!mounted) return;
+    setState(() {
+      robotConnected = connected;
+    });
   }
 
   Future<void> loadConnectivity() async {
@@ -121,7 +133,6 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
       mapState.updateCurrentLocation(newLocation);
       setState(() {});
-      mapController.move(newLocation, mapController.camera.zoom);
     });
   }
 
@@ -150,64 +161,80 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
           appBar: AppBar(
             title: const Text("Livestock Tracker"),
             actions: [
-                        IconButton(
-            icon: Icon(
-              Icons.notifications,
-            ),
-            onPressed:  () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const AlertsScreen()),
-              );
-            },
-          ),
+              IconButton(
+                icon: Icon(Icons.notifications),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AlertsScreen(),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
 
-drawer: AppDrawer(
-  robotConnected: robotConnected,
-  ledOn: ledOn,
-  onLedPressed: () {
-    if (!robotConnected) return;
+          drawer: AppDrawer(
+            robotConnected: robotConnected,
+            ledOn: ledOn,
+            onLedPressed: () {
+              if (!robotConnected) return;
 
-    if (ledOn) {
-      wifi.send("LED_OFF");
-    } else {
-      wifi.send("LED_ON");
-    }
+              if (ledOn) {
+                wifi.send("LED_OFF");
+              } else {
+                wifi.send("LED_ON");
+              }
 
-    setState(() {
-      ledOn = !ledOn;
-    });
-  },
+              setState(() {
+                ledOn = !ledOn;
+              });
+            },
 
-  onGeoFenceTap: () async {
-    await geofence.startEditing(mapController.camera.center);
-    setState(() {});
-  },
-),
+            onGeoFenceTap: () async {
+              await geofence.startEditing(mapController.camera.center);
+              setState(() {});
+            },
+          ),
 
           floatingActionButton: AnimatedPadding(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
-            padding: EdgeInsets.only(
-              bottom: geofence.showPanel ? 85 : 0,
-            ),
-            child:  FloatingActionButton(
-            child: const Icon(Icons.crop_square),
-            onPressed: () {
-              final center = mapController.camera.center;
-              const double offset = 0.01;
-              mapState.updateSelectedBounds(
-                LatLngBounds(
-                  LatLng(center.latitude - offset, center.longitude - offset),
-                  LatLng(center.latitude + offset, center.longitude + offset),
+            padding: EdgeInsets.only(bottom: geofence.showPanel ? 85 : 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  heroTag: "locateMe",
+                  onPressed: recenterToMyLocation,
+                  child: const Icon(Icons.my_location),
                 ),
-              );
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: "selectBounds",
+                  onPressed: () {
+                    final center = mapController.camera.center;
+                    const double offset = 0.01;
+                    mapState.updateSelectedBounds(
+                      LatLngBounds(
+                        LatLng(
+                          center.latitude - offset,
+                          center.longitude - offset,
+                        ),
+                        LatLng(
+                          center.latitude + offset,
+                          center.longitude + offset,
+                        ),
+                      ),
+                    );
 
-              setState(() {});
-            },
-          ),
+                    setState(() {});
+                  },
+                  child: const Icon(Icons.crop_square),
+                ),
+              ],
+            ),
           ),
           bottomNavigationBar: mapState.selectedBounds == null
               ? null
@@ -285,23 +312,20 @@ drawer: AppDrawer(
                       tileProvider: FileTileProvider(),
                       urlTemplate: '$tileDirectory/{z}/{x}/{y}.png',
                     ),
-                      CurrentLocationLayer(
-  alignPositionOnUpdate: AlignOnUpdate.never,
-  alignDirectionOnUpdate: AlignOnUpdate.never,
+                  CurrentLocationLayer(
+                    alignPositionOnUpdate: AlignOnUpdate.never,
+                    alignDirectionOnUpdate: AlignOnUpdate.never,
 
-  style: LocationMarkerStyle(
-    marker: const DefaultLocationMarker(
-      color: Colors.blue,
-    ),
+                    style: LocationMarkerStyle(
+                      marker: const DefaultLocationMarker(color: Colors.blue),
 
-    markerSize: const Size(24, 24),
+                      markerSize: const Size(24, 24),
 
-    headingSectorColor: Colors.blue.withValues(alpha: 0.4),
+                      headingSectorColor: Colors.blue.withValues(alpha: 0.4),
 
-    headingSectorRadius: 80,
-
-  ),
-),
+                      headingSectorRadius: 80,
+                    ),
+                  ),
 
                   MapLayers(
                     geofence: geofence,
@@ -312,63 +336,63 @@ drawer: AppDrawer(
                     },
                   ),
                   MarkerLayer(
-  markers: livestockLocations.entries.map((entry) {
-    return Marker(
-      point: entry.value,
-      width: 60,
-      height: 60,
-child: Column(
-  mainAxisSize: MainAxisSize.min,
-  children: [
-    // Blue circular marker
-    Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(
-        color: Colors.blue,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white,
-          width: 4,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black38,
-            blurRadius: 5,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-    ),
-const SizedBox(height: 4),
-    Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 6,
-        vertical: 2,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 3,
-            color: Colors.black26,
-          ),
-        ],
-      ),
-      child: Text(
-        entry.key, // Animal_ID
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    ),
-  ],
-)
-    );
-  }).toList(),
-),
+                    markers: livestockLocations.entries.map((entry) {
+                      return Marker(
+                        point: entry.value,
+                        width: 60,
+                        height: 60,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Blue circular marker
+                            Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                color: Colors.blue,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 4,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black38,
+                                    blurRadius: 5,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    blurRadius: 3,
+                                    color: Colors.black26,
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                entry.key, // Animal_ID
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ],
               ),
 
