@@ -1,7 +1,6 @@
-# Development Log\
-What We've Built
 
-## 2026-07-23
+# What We've Built
+
 - Refactored app structure
 - Moved OnlineMapScreen into screens/
 - Added MapStateController
@@ -32,6 +31,7 @@ What We've Built
 ✅ Alerts screen for viewing application history
 
 ✅ Automatic logging for:
+
 - Geofence creation
 - Geofence modification
 - Geofence deletion
