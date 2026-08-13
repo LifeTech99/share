@@ -120,106 +120,127 @@ void onStart(ServiceInstance service) async {
 
   final wifi = WifiService();
 
-  // Initial ESP connection.
+  // Initial connection attempt.
   await connectToEsp(wifi);
 
-  // ------------------------------------------------------------
-  // MAINTENANCE TIMER
-  // ------------------------------------------------------------
+  // ============================================================
+  // TIMER 1 — ESP RECONNECT
+  // ============================================================
+  //
+  // This timer ONLY handles ESP connection.
+  //
+  // It checks every 5 seconds whether the ESP is connected.
   //
   // IMPORTANT:
-  // There is ONLY ONE periodic timer.
+  // Do NOT put another Timer.periodic inside this timer.
   //
-  // It runs every 5 seconds and:
-  //
-  // 1. Checks ESP connection.
-  // 2. Reconnects if necessary.
-  // 3. Performs animal cleanup every 10 seconds.
-  //
-  // We DO NOT create another Timer.periodic inside this timer.
-  // ------------------------------------------------------------
+  // ============================================================
 
-  DateTime lastCleanup = DateTime.now();
-
-  final maintenanceTimer = Timer.periodic(const Duration(seconds: 5), (
+  final reconnectTimer = Timer.periodic(const Duration(seconds: 5), (
     timer,
   ) async {
     try {
-      // ----------------------------------------------------------
-      // CHECK ESP CONNECTION
-      // ----------------------------------------------------------
-
       if (!wifi.isConnected) {
         debugPrint('ESP disconnected. Reconnecting...');
 
         await connectToEsp(wifi);
       }
-
-      // ----------------------------------------------------------
-      // ANIMAL CLEANUP
-      // ----------------------------------------------------------
-
-      final now = DateTime.now();
-
-      // Only perform cleanup every 10 seconds.
-      if (now.difference(lastCleanup).inSeconds >= 10) {
-        lastCleanup = now;
-
-        final before = _onlineAnimals.length;
-
-        _onlineAnimals.removeWhere((deviceId, lastSeen) {
-          return now.difference(lastSeen).inSeconds > 30;
-        });
-
-        final after = _onlineAnimals.length;
-
-        debugPrint('Online animals: $after');
-
-        // --------------------------------------------------------
-        // UPDATE FOREGROUND NOTIFICATION
-        // ONLY IF COUNT CHANGED
-        // --------------------------------------------------------
-
-        if (after != before && service is AndroidServiceInstance) {
-          await service.setForegroundNotificationInfo(
-            title: 'Livestock Tracker',
-            content: '$after animals online',
-          );
-        }
-      }
     } catch (e, stackTrace) {
-      debugPrint('Maintenance timer error: $e');
+      debugPrint('Reconnect timer error: $e');
 
       debugPrint('$stackTrace');
     }
   });
 
-  // ------------------------------------------------------------
-  // STOP SERVICE EVENT
-  // ------------------------------------------------------------
+  // ============================================================
+  // TIMER 2 — ONLINE ANIMAL CLEANUP
+  // ============================================================
+  //
+  // This timer ONLY handles online animal timeout.
+  //
+  // Every 10 seconds:
+  //
+  // - Check the last-seen time of every animal.
+  // - Remove animals not seen for more than 30 seconds.
+  // - Update foreground notification if the count changed.
+  //
+  // ============================================================
+
+  final cleanupTimer = Timer.periodic(const Duration(seconds: 10), (
+    timer,
+  ) async {
+    try {
+      final now = DateTime.now();
+
+      final before = _onlineAnimals.length;
+
+      _onlineAnimals.removeWhere((deviceId, lastSeen) {
+        final elapsed = now.difference(lastSeen).inSeconds;
+
+        return elapsed > 30;
+      });
+
+      final after = _onlineAnimals.length;
+
+      // --------------------------------------------------------
+      // LOG ONLINE ANIMAL COUNT
+      // --------------------------------------------------------
+
+      debugPrint('Online animals: $after');
+
+      // --------------------------------------------------------
+      // UPDATE FOREGROUND NOTIFICATION
+      // ONLY WHEN COUNT CHANGED
+      // --------------------------------------------------------
+
+      if (after != before && service is AndroidServiceInstance) {
+        await service.setForegroundNotificationInfo(
+          title: 'Livestock Tracker',
+          content: '$after animals online',
+        );
+
+        debugPrint(
+          'Foreground notification updated: '
+          '$after animals online',
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Cleanup timer error: $e');
+
+      debugPrint('$stackTrace');
+    }
+  });
+
+  // ============================================================
+  // STOP SERVICE
+  // ============================================================
 
   service.on('stop').listen((event) {
     debugPrint('Stopping background service...');
 
-    maintenanceTimer.cancel();
+    // Cancel both timers.
+    reconnectTimer.cancel();
+    cleanupTimer.cancel();
 
-    debugPrint('Maintenance timer cancelled');
+    debugPrint('Reconnect timer cancelled');
+
+    debugPrint('Cleanup timer cancelled');
 
     service.stopSelf();
   });
 
-  // ------------------------------------------------------------
+  // ============================================================
   // WIFI MESSAGE LISTENER
-  // ------------------------------------------------------------
+  // ============================================================
 
   wifi.messages.listen(
     (json) async {
       try {
         debugPrint('Received ESP message: $json');
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // DEVICE ID
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final deviceId = json['device_id'];
 
@@ -231,9 +252,9 @@ void onStart(ServiceInstance service) async {
 
         final String animalId = deviceId.toString();
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // UPDATE ONLINE ANIMAL
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final before = _onlineAnimals.length;
 
@@ -241,10 +262,10 @@ void onStart(ServiceInstance service) async {
 
         final after = _onlineAnimals.length;
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // UPDATE FOREGROUND NOTIFICATION
         // ONLY WHEN A NEW ANIMAL COMES ONLINE
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         if (after != before && service is AndroidServiceInstance) {
           await service.setForegroundNotificationInfo(
@@ -252,26 +273,29 @@ void onStart(ServiceInstance service) async {
             content: '$after animals online',
           );
 
-          debugPrint('Foreground notification updated: $after animals online');
+          debugPrint(
+            'Foreground notification updated: '
+            '$after animals online',
+          );
         }
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // GPS DATA
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final latitude = (json['latitude'] as num).toDouble();
 
         final longitude = (json['longitude'] as num).toDouble();
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // BATTERY
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final battery = (json['battery'] as num).toInt();
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // LOW BATTERY NOTIFICATION
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final lastBattery = _lastBatteryNotification[animalId];
 
@@ -288,15 +312,15 @@ void onStart(ServiceInstance service) async {
           );
         }
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // TIMESTAMP
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final timestamp = json['timestamp'] as String;
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // GET GEOFENCE
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final fence = await DatabaseHelper.instance.getGeofence();
 
@@ -308,17 +332,17 @@ void onStart(ServiceInstance service) async {
 
         final geofenceId = fence['id'] as int;
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // GET GEOFENCE POLYGON
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final polygon = await DatabaseHelper.instance.getGeofencePoints(
           geofenceId,
         );
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // POINT-IN-POLYGON CHECK
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final inside = GeofenceUtils.isPointInsidePolygon(
           LatLng(latitude, longitude),
@@ -327,17 +351,20 @@ void onStart(ServiceInstance service) async {
 
         final geofenceStatus = inside ? 'inside' : 'outside';
 
-        debugPrint('$animalId is $geofenceStatus the geofence');
+        debugPrint(
+          '$animalId is $geofenceStatus '
+          'the geofence',
+        );
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // PREVIOUS GEOFENCE STATE
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         final previous = _previousGeofenceState[animalId];
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // FIRST GPS LOCATION
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         if (previous == null) {
           _previousGeofenceState[animalId] = inside;
@@ -347,9 +374,9 @@ void onStart(ServiceInstance service) async {
             '$animalId: $geofenceStatus',
           );
         }
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // GEOFENCE STATE CHANGED
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         else if (previous != inside) {
           _previousGeofenceState[animalId] = inside;
 
@@ -368,9 +395,9 @@ void onStart(ServiceInstance service) async {
           }
         }
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // UPDATE DASHBOARD
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         await DatabaseHelper.instance.updateDashboard(
           animalId: animalId,
@@ -382,9 +409,9 @@ void onStart(ServiceInstance service) async {
           geofenceId: geofenceId,
         );
 
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
         // SAVE LOCATION HISTORY
-        // ----------------------------------------------------------
+        // --------------------------------------------------------
 
         await DatabaseHelper.instance.insertDashboardHistory(
           animalId: animalId,
@@ -396,7 +423,10 @@ void onStart(ServiceInstance service) async {
           geofenceId: geofenceId,
         );
 
-        debugPrint('Dashboard/history updated for $animalId');
+        debugPrint(
+          'Dashboard/history updated for '
+          '$animalId',
+        );
       } catch (e, stackTrace) {
         debugPrint('Error processing ESP message: $e');
 
@@ -426,7 +456,10 @@ Future<void> connectToEsp(WifiService wifi) async {
         return;
       }
 
-      debugPrint('ESP connection failed. Retrying in 5 seconds...');
+      debugPrint(
+        'ESP connection failed. '
+        'Retrying in 5 seconds...',
+      );
     } catch (e) {
       debugPrint('ESP connection error: $e');
     }
