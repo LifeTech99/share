@@ -44,7 +44,12 @@ dependencies:
   path: ^1.9.0
   flutter_map_dragmarker: ^8.0.3
   flutter_riverpod: ^3.3.2
-  
+  data_table_2: ^2.6.0
+  flutter_map_location_marker: ^10.1.0
+  flutter_background_service: ^5.0.10
+  flutter_background_service_android: ^6.3.0
+  flutter_local_notifications: ^19.4.0
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.3

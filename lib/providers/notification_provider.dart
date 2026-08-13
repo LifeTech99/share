@@ -1,5 +1,4 @@
 // lib/providers/notification_provider.dart
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database_helper.dart';
 
@@ -11,6 +10,8 @@ enum LogEventType {
   boundaryBreached,
   deviceConnected,
   deviceDisconnected,
+  geofence,
+  battery,
 }
 
 class LogEvent {

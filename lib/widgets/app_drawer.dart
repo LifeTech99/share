@@ -1,10 +1,19 @@
 import 'package:flutter/material.dart';
-import '../screens/alerts_screen.dart';
+import '../screens/dashboard_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   final VoidCallback onGeoFenceTap;
+  final bool robotConnected;
+  final bool ledOn;
+  final VoidCallback onLedPressed;
 
-  const AppDrawer({super.key, required this.onGeoFenceTap});
+  const AppDrawer({
+    super.key,
+    required this.onGeoFenceTap,
+    required this.robotConnected,
+    required this.ledOn,
+    required this.onLedPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -12,21 +21,50 @@ class AppDrawer extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          const DrawerHeader(
-            decoration: BoxDecoration(color: Colors.green),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.pets, size: 60, color: Colors.white),
-                SizedBox(height: 10),
-                Text(
-                  "Livestock Tracker",
-                  style: TextStyle(color: Colors.white, fontSize: 22),
-                ),
-              ],
+          SizedBox(
+            height: 240,
+            child: DrawerHeader(
+              decoration: BoxDecoration(color: Colors.green),
+              margin: EdgeInsets.zero,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.pets, size: 60, color: Colors.white),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Livestock Tracker",
+                    style: TextStyle(color: Colors.white, fontSize: 22),
+                  ),
+
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          robotConnected ? Icons.wifi : Icons.wifi_off,
+                          color: robotConnected ? Colors.white : Colors.red,
+                        ),
+
+                        const SizedBox(width: 8),
+
+                        IconButton(
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.lightbulb,
+                            color: ledOn ? Colors.yellow : Colors.white,
+                          ),
+                          onPressed: robotConnected ? onLedPressed : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-
           ListTile(
             leading: const Icon(Icons.home),
             title: const Text("Home"),
@@ -53,13 +91,13 @@ class AppDrawer extends StatelessWidget {
           ),
 
           ListTile(
-            leading: const Icon(Icons.notifications),
-            title: const Text("Alerts"),
+            leading: const Icon(Icons.dashboard),
+            title: const Text("Dashboard"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const AlertsScreen()),
+                MaterialPageRoute(builder: (_) => const DashboardScreen()),
               );
             },
           ),
