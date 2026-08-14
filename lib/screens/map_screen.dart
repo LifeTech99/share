@@ -23,6 +23,9 @@ import '../widgets/app_drawer.dart';
 import '../widgets/download_progress_dialog.dart';
 import '../widgets/geofence_panel.dart';
 
+import '../providers/map_state_provider.dart';
+import '../providers/livestock_provider.dart';
+
 class OnlineMapScreen extends ConsumerStatefulWidget {
   const OnlineMapScreen({super.key});
 
@@ -37,7 +40,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   StreamSubscription<Position>? positionStream;
   Timer? _refreshTimer;
 
-  final MapStateController mapState = MapStateController();
+  //final MapStateController mapState = MapStateController();
 
   String? tileDirectory;
 
@@ -57,6 +60,13 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   bool ledOn = false;
 
   final GeofenceController geofence = GeofenceController();
+
+  MapStateController get mapState =>
+    ref.read(mapStateControllerProvider);
+
+  StreamSubscription? livestockSubscription;
+
+  bool livestockConnected = false;
 
   Map<String, bool> lastGeofenceStatus = {};
   Map<String, int> lastBattery = {};
@@ -94,12 +104,81 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
     });
   }
 
+  Future<void> connectLivestockWebSocket() async {
+
+  final service =
+      ref.read(
+        livestockWebSocketProvider,
+      );
+
+
+  livestockSubscription =
+      service.dataStream.listen(
+    (data) {
+
+      if (!mounted) return;
+
+
+      final mapState =
+          ref.read(
+            mapStateControllerProvider,
+          );
+
+
+      mapState.updateAnimalData(
+        data,
+      );
+
+
+      setState(() {
+        livestockConnected = true;
+      });
+
+
+      debugPrint(
+        'Animal location: '
+        '${data.latitude}, '
+        '${data.longitude}',
+      );
+
+
+      debugPrint(
+        'Animal status: '
+        '${data.moving ? "MOVING" : "STATIONARY"}',
+      );
+    },
+  );
+
+
+  final connected =
+      await service.connect(
+    host: "192.168.4.1",
+    port: 81,
+  );
+
+
+  if (!mounted) return;
+
+
+  setState(() {
+    livestockConnected =
+        connected;
+  });
+
+
+  debugPrint(
+    connected
+        ? 'Livestock WebSocket connected'
+        : 'Livestock WebSocket connection failed',
+  );
+}
+
   // ---------------------------------------------------------------------------
   // MAP LOCATION
   // ---------------------------------------------------------------------------
 
   void recenterToMyLocation() {
-    final currentLocation = mapState.currentLocation;
+    final currentLocation = ref.read(mapStateControllerProvider).currentLocation;
 
     if (currentLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -122,7 +201,8 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
     loadTileDirectory();
     loadConnectivity();
     loadLivestockLocations();
-    connectWifi();
+    //connectWifi();
+    connectLivestockWebSocket();
 
     _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       loadLivestockLocations();
@@ -219,6 +299,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     positionStream?.cancel();
+    livestockSubscription?.cancel();
 
     progressNotifier.dispose();
     wifi.dispose();
@@ -637,6 +718,97 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                   );
                 }).toList(),
               ),
+              // ---------------------------------------------------------------
+// LIVE ESP8266 ANIMAL
+// ---------------------------------------------------------------
+
+if (mapState.animalData != null)
+  MarkerLayer(
+    markers: [
+      Marker(
+        point: LatLng(
+          mapState.animalData!.latitude,
+          mapState.animalData!.longitude,
+        ),
+
+        width: 70,
+        height: 70,
+
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+
+          children: [
+
+            Container(
+              width: 30,
+              height: 30,
+
+              decoration: BoxDecoration(
+                color:
+                    mapState.animalData!.moving
+                        ? Colors.orange
+                        : Colors.green,
+
+                shape: BoxShape.circle,
+
+                border: Border.all(
+                  color: Colors.white,
+                  width: 4,
+                ),
+
+                boxShadow: const [
+                  BoxShadow(
+                    blurRadius: 5,
+                    color: Colors.black38,
+                  ),
+                ],
+              ),
+
+              child: const Icon(
+                Icons.pets,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+
+            const SizedBox(height: 3),
+
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(
+                horizontal: 6,
+                vertical: 2,
+              ),
+
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                    BorderRadius.circular(10),
+
+                boxShadow: const [
+                  BoxShadow(
+                    blurRadius: 3,
+                    color: Colors.black26,
+                  ),
+                ],
+              ),
+
+              child: Text(
+                mapState.animalData!.moving
+                    ? 'MOVING'
+                    : 'STATIONARY',
+
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
             ],
           ),
 
