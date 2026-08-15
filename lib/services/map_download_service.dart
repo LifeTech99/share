@@ -59,6 +59,7 @@ class MapDownloadService {
               x: x,
               y: y,
             );
+              await Future.delayed(const Duration(milliseconds: 200));
           }
 
           downloadedTiles++;

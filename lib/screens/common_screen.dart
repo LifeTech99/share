@@ -11,28 +11,28 @@ import '../controllers/map_state_controller.dart';
 import '../database/database_helper.dart';
 import '../geofence/geofence.dart';
 import '../geofence/map_layers.dart';
-import '../models/download_progress.dart';
 import '../providers/notification_provider.dart';
 import '../screens/alerts_screen.dart';
 import '../services/connectivity_service.dart';
 import '../services/location_service.dart';
-import '../services/map_download_service.dart';
 import '../services/tile_cache_service.dart';
 import '../services/wifi_service.dart';
 import '../widgets/app_drawer.dart';
-import '../widgets/download_progress_dialog.dart';
 import '../widgets/geofence_panel.dart';
 
-class OnlineMapScreen extends ConsumerStatefulWidget {
-  const OnlineMapScreen({super.key});
+class CommonScreen extends ConsumerStatefulWidget {
+  const CommonScreen({super.key});
 
   @override
-  ConsumerState<OnlineMapScreen> createState() => _OnlineMapScreenState();
+  ConsumerState<CommonScreen> createState() => _CommonScreenState();
 }
 
-class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
+class _CommonScreenState extends ConsumerState<CommonScreen> {
+  // ---------------------------------------------------------------------------
+  // MAP / LOCATION
+  // ---------------------------------------------------------------------------
+
   final MapController mapController = MapController();
-  bool downloadMode = false;
   final LocationService locationService = LocationService();
 
   StreamSubscription<Position>? positionStream;
@@ -45,28 +45,36 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   bool isOnline = true;
 
   final ConnectivityService connectivityService = ConnectivityService();
-  final MapDownloadService downloader = MapDownloadService();
 
-  final ValueNotifier<DownloadProgress?> progressNotifier =
-      ValueNotifier<DownloadProgress?>(null);
+  // ---------------------------------------------------------------------------
+  // LIVESTOCK
+  // ---------------------------------------------------------------------------
 
   Map<String, LatLng> livestockLocations = {};
+
+  // ---------------------------------------------------------------------------
+  // GEOFENCE
+  // ---------------------------------------------------------------------------
+
+  final GeofenceController geofence = GeofenceController();
+
+  // ---------------------------------------------------------------------------
+  // NOTIFICATIONS
+  // ---------------------------------------------------------------------------
+
+  int unreadAlerts = 0;
+
+  // ---------------------------------------------------------------------------
+  // WIFI / ROBOT
+  // ---------------------------------------------------------------------------
 
   final WifiService wifi = WifiService();
 
   bool robotConnected = false;
   bool ledOn = false;
 
-  final GeofenceController geofence = GeofenceController();
-
-  Map<String, bool> lastGeofenceStatus = {};
-  Map<String, int> lastBattery = {};
-
-  // Number of unread notifications.
-  int unreadAlerts = 0;
-
   // ---------------------------------------------------------------------------
-  // LIVESTOCK LOCATION
+  // LOAD LIVESTOCK LOCATIONS
   // ---------------------------------------------------------------------------
 
   Future<void> loadLivestockLocations() async {
@@ -79,7 +87,6 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
       for (final animal in animals) {
         final animalId = animal["Animal_ID"];
-
         final latitude = animal["Latitude"];
         final longitude = animal["Longitude"];
 
@@ -96,7 +103,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // MAP LOCATION
+  // RECENTER TO CURRENT LOCATION
   // ---------------------------------------------------------------------------
 
   void recenterToMyLocation() {
@@ -106,6 +113,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Current location is not available yet.')),
       );
+
       return;
     }
 
@@ -128,7 +136,9 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       loadLivestockLocations();
 
-      if (mounted && robotConnected != wifi.isConnected) {
+      if (!mounted) return;
+
+      if (robotConnected != wifi.isConnected) {
         setState(() {
           robotConnected = wifi.isConnected;
         });
@@ -221,7 +231,6 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
     _refreshTimer?.cancel();
     positionStream?.cancel();
 
-    progressNotifier.dispose();
     wifi.dispose();
 
     super.dispose();
@@ -249,8 +258,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   Widget buildNotificationButton() {
     return IconButton(
       tooltip: 'Notifications',
+
       icon: Stack(
         clipBehavior: Clip.none,
+
         children: [
           const Icon(Icons.notifications),
 
@@ -258,26 +269,33 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
             Positioned(
               right: -4,
               top: -4,
+
               child: Container(
                 padding: const EdgeInsets.all(4),
+
                 decoration: const BoxDecoration(
                   color: Colors.red,
                   shape: BoxShape.circle,
                 ),
+
                 constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+
                 child: Text(
                   unreadAlerts > 9 ? '9+' : '$unreadAlerts',
+
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
                   ),
+
                   textAlign: TextAlign.center,
                 ),
               ),
             ),
         ],
       ),
+
       onPressed: openAlerts,
     );
   }
@@ -288,10 +306,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Listen for new notification events.
-    //
-    // Because this screen is already a ConsumerStatefulWidget,
-    // we do not need another Consumer widget around the Scaffold.
+    // -------------------------------------------------------------------------
+    // NOTIFICATION LISTENER
+    // -------------------------------------------------------------------------
+
     ref.listen<List<LogEvent>>(notificationProvider, (previous, next) {
       if (!mounted) return;
 
@@ -303,7 +321,9 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(latestEvent.message),
+
             behavior: SnackBarBehavior.floating,
+
             duration: const Duration(seconds: 3),
           ),
         );
@@ -320,8 +340,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
       // -----------------------------------------------------------------------
       appBar: AppBar(
         title: const Text('Livestock Tracker'),
+
         actions: [buildNotificationButton()],
       ),
+
       // -----------------------------------------------------------------------
       // DRAWER
       // -----------------------------------------------------------------------
@@ -333,158 +355,20 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
           setState(() {});
         },
-        // onDownloadTap: () {
-        //   setState(() {
-        //     downloadMode = true;
-        //   });
-        // },
       ),
 
       // -----------------------------------------------------------------------
-      // FLOATING ACTION BUTTONS
+      // ONLY LIVE LOCATION BUTTON
       // -----------------------------------------------------------------------
-      floatingActionButton: AnimatedPadding(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'commonLocateMe',
 
-        padding: EdgeInsets.only(bottom: geofence.showPanel ? 85 : 0),
+        tooltip: 'Show my location',
 
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // -----------------------------------------------------------------
-            // CURRENT LOCATION BUTTON
-            // -----------------------------------------------------------------
-            FloatingActionButton(
-              heroTag: 'locateMe',
-              tooltip: 'Show my location',
-              onPressed: recenterToMyLocation,
-              child: const Icon(Icons.my_location),
-            ),
+        onPressed: recenterToMyLocation,
 
-            // -----------------------------------------------------------------
-            // SELECT MAP DOWNLOAD AREA
-            // -----------------------------------------------------------------
-            if (isOnline) ...[
-              const SizedBox(height: 12),
-
-              FloatingActionButton(
-                heroTag: 'selectBounds',
-                tooltip: mapState.selectedBounds == null
-                    ? 'Select offline area'
-                    : 'Selection in progress',
-                onPressed: mapState.selectedBounds != null
-                    ? null
-                    : () {
-                        final center = mapController.camera.center;
-                        const double offset = 0.01;
-                        downloadMode = true;
-
-                        mapState.updateSelectedBounds(
-                          LatLngBounds(
-                            LatLng(
-                              center.latitude - offset,
-                              center.longitude - offset,
-                            ),
-                            LatLng(
-                              center.latitude + offset,
-                              center.longitude + offset,
-                            ),
-                          ),
-                        );
-
-                        setState(() {});
-                      },
-
-                child: const Icon(Icons.crop_square),
-              ),
-            ],
-
-            if (downloadMode && mapState.selectedBounds != null) ...[
-              const SizedBox(height: 12),
-              FloatingActionButton(
-                heroTag: 'cancelBounds',
-                tooltip: 'Cancel selection',
-                backgroundColor: Colors.red,
-                onPressed: () {
-                  mapState.clearSelectedBounds();
-                  downloadMode = false;
-                  setState(() {});
-                },
-                child: const Icon(Icons.close),
-              ),
-            ],
-          ],
-        ),
+        child: const Icon(Icons.my_location),
       ),
-
-      // -----------------------------------------------------------------------
-      // MAP DOWNLOAD BUTTON
-      // -----------------------------------------------------------------------
-      bottomNavigationBar: (downloadMode && mapState.selectedBounds != null)
-          ? Padding(
-              padding: const EdgeInsets.all(12),
-
-              child: ElevatedButton(
-                onPressed: () async {
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-
-                    builder: (_) => DownloadProgressDialog(
-                      progressNotifier: progressNotifier,
-
-                      onCancel: () {
-                        downloader.cancelDownload();
-                      },
-                    ),
-                  );
-
-                  await downloader.downloadArea(
-                    bounds: mapState.selectedBounds!,
-                    minZoom: 13,
-                    maxZoom: 19,
-
-                    onProgress: (progress) {
-                      progressNotifier.value = progress;
-                    },
-                  );
-
-                  if (mounted) {
-                    Navigator.of(context).pop();
-                  }
-
-                  if (!mounted) return;
-
-                  if (downloader.isCancelled) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Download cancelled')),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Offline map downloaded successfully upto zoom level 19 ',
-                        ),
-                      ),
-                    );
-
-                    ref
-                        .read(notificationProvider.notifier)
-                        .log(
-                          LogEventType.mapDownloaded,
-                          'Offline map downloaded '
-                          '(zoom up to 19)',
-                        );
-                  }
-                  mapState.clearSelectedBounds();
-                  downloadMode = false;
-                  setState(() {});
-                },
-                child: const Text('Download Area'),
-              ),
-            )
-          : null,
 
       // -----------------------------------------------------------------------
       // BODY
@@ -492,7 +376,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
       body: Stack(
         children: [
           // -------------------------------------------------------------------
-          // MAP
+          // NORMAL MAP
           // -------------------------------------------------------------------
           FlutterMap(
             mapController: mapController,
@@ -503,7 +387,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
               initialZoom: 15,
 
-              maxZoom: 19,
+              maxZoom: 21,
             ),
 
             children: [
@@ -517,8 +401,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                       '{z}/{x}/{y}.png',
 
                   userAgentPackageName: 'com.example.livestock_tracker',
+
                   maxNativeZoom: 19,
-                  maxZoom: 19,
+
+                  maxZoom: 21,
                 )
               // ---------------------------------------------------------------
               // OFFLINE MAP
@@ -527,7 +413,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                 TileLayer(
                   tileProvider: FileTileProvider(),
 
-                  urlTemplate: '$tileDirectory/{z}/{x}/{y}.png',
+                  urlTemplate:
+                      '$tileDirectory/'
+                      '{z}/{x}/{y}.png',
+
                   maxNativeZoom: 19,
                 ),
 
@@ -551,19 +440,25 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
               ),
 
               // ---------------------------------------------------------------
-              // GEOFENCE / MAP LAYERS
+              // GEOFENCE
               // ---------------------------------------------------------------
               MapLayers(
                 geofence: geofence,
+
                 currentLocation: mapState.currentLocation,
-                selectedBounds: mapState.selectedBounds,
+
+                // IMPORTANT:
+                // CommonScreen never owns
+                // offline-map selection.
+                selectedBounds: null,
+
                 refresh: () {
                   setState(() {});
                 },
-                onBoundsChanged: (bounds) {
-                  mapState.updateSelectedBounds(bounds);
-                  setState(() {});
-                },
+
+                // No rectangle manipulation
+                // is allowed on CommonScreen.
+                onBoundsChanged: (_) {},
               ),
 
               // ---------------------------------------------------------------
@@ -581,9 +476,9 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                       mainAxisSize: MainAxisSize.min,
 
                       children: [
-                        // ---------------------------------------------------
+                        // -------------------------------------------------
                         // ANIMAL MARKER
-                        // ---------------------------------------------------
+                        // -------------------------------------------------
                         Container(
                           width: 22,
                           height: 22,
@@ -607,9 +502,9 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
                         const SizedBox(height: 4),
 
-                        // ---------------------------------------------------
+                        // -------------------------------------------------
                         // ANIMAL ID
-                        // ---------------------------------------------------
+                        // -------------------------------------------------
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
