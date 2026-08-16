@@ -416,6 +416,7 @@ class _CommonScreenState extends ConsumerState<CommonScreen> {
                   urlTemplate:
                       '$tileDirectory/'
                       '{z}/{x}/{y}.png',
+                  maxZoom: 19,
 
                   maxNativeZoom: 19,
                 ),

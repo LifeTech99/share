@@ -529,6 +529,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                   tileProvider: FileTileProvider(),
 
                   urlTemplate: '$tileDirectory/{z}/{x}/{y}.png',
+                  maxZoom: 19,
                   maxNativeZoom: 19,
                 ),
 

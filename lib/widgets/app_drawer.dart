@@ -3,6 +3,7 @@ import '../screens/dashboard_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/map_screen.dart';
 import '../screens/settings_screen.dart';
+import '../screens/alerts_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   final VoidCallback onGeoFenceTap;
@@ -96,6 +97,21 @@ class AppDrawer extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const DashboardScreen()),
+              );
+            },
+          ),
+
+          // -------------------------------------------------------------------
+          // ALERTS
+          // -------------------------------------------------------------------
+          ListTile(
+            leading: const Icon(Icons.notifications),
+            title: const Text("Alerts"),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AlertsScreen()),
               );
             },
           ),
