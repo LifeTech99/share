@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../models/gps_data.dart';
 
 class DatabaseHelper {
   DatabaseHelper._privateConstructor();
@@ -9,55 +10,90 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
 
   static Database? _database;
-  
-  
-  Future<void> updateDashboard({
-  required String animalId,
-  required double latitude,
-  required double longitude,
-  required String status,
-  required int battery,
-  required String timestamp,
-  required int geofenceId,
-}) async {
-  final db = await database;
 
-  final data = {
-    "Animal_ID": animalId,
-    "Latitude": latitude,
-    "Longitude": longitude,
-    "Geofence_Status": status,
-    "Timestamp": timestamp,
-    "Battery":battery,
-    "geofence_id": geofenceId,
-  };
+  // ---------------------------------------------------------------------------
+  // LIVE ANIMAL PERSISTENCE
+  // ---------------------------------------------------------------------------
+  // Single entry point called by LivestockWebSocketService for every
+  // incoming animal packet. Writes both the "current snapshot" row
+  // (dashboard) and an append-only historical row (dashboard_history).
+  //
+  // geofence_id is intentionally nullable here: the websocket service has
+  // no access to GeofenceController (it's per-screen state, not a
+  // singleton), so it can't attach a real geofence at write time. If you
+  // later want history rows tied to a specific fence, that association
+  // needs to happen elsewhere (e.g. when the fence is saved) rather than
+  // here.
 
-  final rows = await db.update(
-    "dashboard",
-    data,
-    where: "Animal_ID = ?",
-    whereArgs: [animalId],
-  );
+  Future<void> recordLiveAnimalUpdate(GpsData animal) async {
+    final timestamp = animal.timestamp.toString();
 
-  if (rows == 0) {
-    await db.insert("dashboard", data);
+    await updateDashboard(
+      animalId: animal.deviceId,
+      latitude: animal.latitude,
+      longitude: animal.longitude,
+      status: '-',
+      battery: animal.battery,
+      timestamp: timestamp,
+      geofenceId: null,
+    );
+
+    await insertDashboardHistory(
+      animalId: animal.deviceId,
+      latitude: animal.latitude,
+      longitude: animal.longitude,
+      status: '-',
+      battery: animal.battery,
+      timestamp: timestamp,
+      geofenceId: null,
+    );
   }
-}
+
+  Future<void> updateDashboard({
+    required String animalId,
+    required double latitude,
+    required double longitude,
+    required String status,
+    required double battery,
+    required String timestamp,
+    int? geofenceId,
+  }) async {
+    final db = await database;
+
+    final data = {
+      "Animal_ID": animalId,
+      "Latitude": latitude,
+      "Longitude": longitude,
+      "Geofence_Status": status,
+      "Timestamp": timestamp,
+      "Battery": battery,
+      "geofence_id": geofenceId,
+    };
+
+    final rows = await db.update(
+      "dashboard",
+      data,
+      where: "Animal_ID = ?",
+      whereArgs: [animalId],
+    );
+
+    if (rows == 0) {
+      await db.insert("dashboard", data);
+    }
+  }
 
   Future<void> insertDashboardHistory({
-  required String animalId,
-  required double latitude,
-  required double longitude,
-  required String status,
-  required int battery,
-  required String timestamp,
-  required int geofenceId,
-}) async {
-  final db = await database;
+    required String animalId,
+    required double latitude,
+    required double longitude,
+    required String status,
+    required double battery,
+    required String timestamp,
+    int? geofenceId,
+  }) async {
+    final db = await database;
 
-  await db.insert(
-    "dashboard_history",
-    {
+    await db.insert("dashboard_history", {
       "Animal_ID": animalId,
       "Latitude": latitude,
       "Longitude": longitude,
@@ -65,9 +101,8 @@ class DatabaseHelper {
       "Battery": battery,
       "Timestamp": timestamp,
       "geofence_id": geofenceId,
-    },    
-  );
-}
+    });
+  }
 
   Future<Map<String, Object?>?> getGeofence() async {
     final db = await database;
@@ -146,48 +181,38 @@ class DatabaseHelper {
     final db = await database;
     return await db.query('logs', orderBy: 'timestamp DESC');
   }
-Future<List<Map<String, Object?>>> getDashboard() async {
-  final db = await database;
 
-  return await db.query(
-    "dashboard",
-    orderBy: "Timestamp DESC",
-  );
-}
-   
-   Future<List<Map<String, Object?>>> getDashboardLast15Days() async {
-  final db = await database;
+  Future<List<Map<String, Object?>>> getDashboard() async {
+    final db = await database;
 
-  return await db.query(
-    "dashboard_history",
-    where:
-        "Timestamp >= datetime('now','-15 day')",
-    orderBy: "Timestamp DESC",
-  );
-}
- 
+    return await db.query("dashboard", orderBy: "Timestamp DESC");
+  }
 
- Future<List<Map<String, Object?>>> getDashboardLast30Days() async {
-  final db = await database;
+  Future<List<Map<String, Object?>>> getDashboardLast15Days() async {
+    final db = await database;
 
-  return await db.query(
-    "dashboard_history",
-    where:
-        "Timestamp >= datetime('now','-30 day')",
-    orderBy: "Timestamp DESC",
-  );
-}
+    return await db.query(
+      "dashboard_history",
+      where: "Timestamp >= datetime('now','-15 day')",
+      orderBy: "Timestamp DESC",
+    );
+  }
 
-  
+  Future<List<Map<String, Object?>>> getDashboardLast30Days() async {
+    final db = await database;
+
+    return await db.query(
+      "dashboard_history",
+      where: "Timestamp >= datetime('now','-30 day')",
+      orderBy: "Timestamp DESC",
+    );
+  }
+
   Future<List<Map<String, Object?>>> getDashboardHistory() async {
-  final db = await database;
+    final db = await database;
 
-  return await db.query(
-    "dashboard_history",
-    orderBy: "Timestamp DESC",
-  );
-}
-
+    return await db.query("dashboard_history", orderBy: "Timestamp DESC");
+  }
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -201,7 +226,7 @@ Future<List<Map<String, Object?>>> getDashboard() async {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -225,38 +250,33 @@ Future<List<Map<String, Object?>>> getDashboard() async {
         FOREIGN KEY (geofence_id) REFERENCES geofence(id)
       )
     ''');
-    
+
     await db.execute('''
       CREATE TABLE dashboard (
         Animal_ID TEXT PRIMARY KEY,
         Latitude REAL NOT NULL,
         Longitude REAL NOT NULL,
-        Geofence_Status TEXT NOT NULL,
+        Geofence_Status TEXT NOT NULL DEFAULT '-',
         Timestamp TEXT NOT NULL,
-        Battery INTEGER NOT NULL,
-        geofence_id INTEGER NOT NULL,
+        Battery REAL NOT NULL,
+        geofence_id INTEGER,
         FOREIGN KEY (geofence_id) REFERENCES geofence(id)
       )
     ''');
 
-        await db.execute('''
+    await db.execute('''
       CREATE TABLE dashboard_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         Animal_ID TEXT NOT NULL,
         Latitude REAL NOT NULL,
         Longitude REAL NOT NULL,
-        Geofence_Status TEXT NOT NULL,
+        Geofence_Status TEXT NOT NULL DEFAULT '-',
         Timestamp TEXT NOT NULL,
-        Battery INTEGER NOT NULL,
-        geofence_id INTEGER NOT NULL,
+        Battery REAL NOT NULL,
+        geofence_id INTEGER,
         FOREIGN KEY (geofence_id) REFERENCES geofence(id)
       )
     ''');
-
-    await db.delete(
-      'dashboard_history',
-      where: "Timestamp < datetime('now', '-30 days')",
-    );
 
     await db.execute('''
       CREATE TABLE logs (
@@ -279,11 +299,47 @@ Future<List<Map<String, Object?>>> getDashboard() async {
         )
       ''');
     }
+
+    if (oldVersion < 3) {
+      // dashboard/dashboard_history previously had geofence_id NOT NULL
+      // and Battery as INTEGER. Neither was ever actually populated (no
+      // code wrote to these tables), so this drop+recreate is safe — it
+      // does not remove any real data, only fixes the schema.
+      await db.execute('DROP TABLE IF EXISTS dashboard');
+      await db.execute('DROP TABLE IF EXISTS dashboard_history');
+
+      await db.execute('''
+        CREATE TABLE dashboard (
+          Animal_ID TEXT PRIMARY KEY,
+          Latitude REAL NOT NULL,
+          Longitude REAL NOT NULL,
+          Geofence_Status TEXT NOT NULL DEFAULT '-',
+          Timestamp TEXT NOT NULL,
+          Battery REAL NOT NULL,
+          geofence_id INTEGER,
+          FOREIGN KEY (geofence_id) REFERENCES geofence(id)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE dashboard_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          Animal_ID TEXT NOT NULL,
+          Latitude REAL NOT NULL,
+          Longitude REAL NOT NULL,
+          Geofence_Status TEXT NOT NULL DEFAULT '-',
+          Timestamp TEXT NOT NULL,
+          Battery REAL NOT NULL,
+          geofence_id INTEGER,
+          FOREIGN KEY (geofence_id) REFERENCES geofence(id)
+        )
+      ''');
+    }
   }
 
   Future<void> clearDashboardHistory() async {
     final db = await database;
-    await db.delete("dashboard_records");
+    await db.delete("dashboard_history");
   }
 
   Future<void> clearLogs() async {

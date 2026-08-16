@@ -6,14 +6,19 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../database/database_helper.dart';
+import '../models/reporting_interval.dart';
 import '../providers/notification_provider.dart';
 import '../providers/provider_container.dart';
 import 'package:livestock_tracker/services/geofence_service.dart';
-import 'wifi_service.dart';
+import 'package:livestock_tracker/services/wifi_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'livestock_websocket_service.dart';
 
 final Map<String, bool> _previousGeofenceState = {};
+final Map<String, DateTime> _lastHistorySaved = {};
+ReportingInterval _reportingInterval = ReportingInterval.oneMinute;
+final Map<String, double> _lastBatteryNotification = {};
 final Map<String, DateTime> _onlineAnimals = {};
-final Map<String, int> _lastBatteryNotification = {};
 
 class BackgroundService {
   static final FlutterBackgroundService _service = FlutterBackgroundService();
@@ -88,6 +93,62 @@ class BackgroundService {
   }
 }
 
+Future<void> _loadReportingInterval() async {
+  final prefs = await SharedPreferences.getInstance();
+
+  final saved = prefs.getString('reporting_interval');
+
+  _reportingInterval = ReportingIntervalX.fromStorageKey(saved);
+
+  debugPrint(
+    'Reporting interval loaded: '
+    '${_reportingInterval.label}',
+  );
+}
+
+bool _shouldSaveHistory({required String animalId, required bool moving}) {
+  final now = DateTime.now();
+
+  final lastSaved = _lastHistorySaved[animalId];
+
+  if (lastSaved == null) {
+    _lastHistorySaved[animalId] = now;
+    return true;
+  }
+
+  switch (_reportingInterval) {
+    case ReportingInterval.oneMinute:
+      if (now.difference(lastSaved).inMinutes >= 1) {
+        _lastHistorySaved[animalId] = now;
+        return true;
+      }
+      break;
+
+    case ReportingInterval.fiveMinutes:
+      if (now.difference(lastSaved).inMinutes >= 5) {
+        _lastHistorySaved[animalId] = now;
+        return true;
+      }
+      break;
+
+    case ReportingInterval.thirtyMinutes:
+      if (now.difference(lastSaved).inMinutes >= 30) {
+        _lastHistorySaved[animalId] = now;
+        return true;
+      }
+      break;
+
+    case ReportingInterval.movementBased:
+      if (moving) {
+        _lastHistorySaved[animalId] = now;
+        return true;
+      }
+      break;
+  }
+
+  return false;
+}
+
 // ============================================================================
 // BACKGROUND SERVICE ENTRY POINT
 // ============================================================================
@@ -95,6 +156,7 @@ class BackgroundService {
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
   debugPrint('onStart() called');
+  await _loadReportingInterval();
 
   // ------------------------------------------------------------
   // ANDROID FOREGROUND SERVICE
@@ -103,8 +165,26 @@ void onStart(ServiceInstance service) async {
   if (service is AndroidServiceInstance) {
     service.setAsForegroundService();
 
-    debugPrint('Foreground service requested');
+    await service.setForegroundNotificationInfo(
+      title: 'Livestock Tracker',
+      content: 'No animals online',
+    );
   }
+
+  // Listen to live WebSocket telemetry stream for active online animals count
+  LivestockWebSocketService().animalStream.listen((animal) async {
+    final before = _onlineAnimals.length;
+    _onlineAnimals[animal.deviceId] = DateTime.now();
+    final after = _onlineAnimals.length;
+
+    if (after != before && service is AndroidServiceInstance) {
+      final text = after == 1 ? '1 animal online' : '$after animals online';
+      await service.setForegroundNotificationInfo(
+        title: 'Livestock Tracker',
+        content: text,
+      );
+    }
+  });
 
   // ------------------------------------------------------------
   // WIFI SERVICE
@@ -115,92 +195,40 @@ void onStart(ServiceInstance service) async {
   // Initial connection attempt.
   await connectToEsp(wifi);
 
-  // ============================================================
-  // TIMER 1 — ESP RECONNECT
-  // ============================================================
-  //
-  // This timer ONLY handles ESP connection.
-  //
-  // It checks every 5 seconds whether the ESP is connected.
-  //
-  // IMPORTANT:
-  // Do NOT put another Timer.periodic inside this timer.
-  //
-  // ============================================================
-
   final reconnectTimer = Timer.periodic(const Duration(seconds: 5), (
     timer,
   ) async {
     try {
       if (!wifi.isConnected) {
-        debugPrint('ESP disconnected. Reconnecting...');
-
         await connectToEsp(wifi);
       }
-    } catch (e, stackTrace) {
-      debugPrint('Reconnect timer error: $e');
-
-      debugPrint('$stackTrace');
-    }
+    } catch (_) {}
   });
-
-  // ============================================================
-  // TIMER 2 — ONLINE ANIMAL CLEANUP
-  // ============================================================
-  //
-  // This timer ONLY handles online animal timeout.
-  //
-  // Every 10 seconds:
-  //
-  // - Check the last-seen time of every animal.
-  // - Remove animals not seen for more than 30 seconds.
-  // - Update foreground notification if the count changed.
-  //
-  // ============================================================
 
   final cleanupTimer = Timer.periodic(const Duration(seconds: 10), (
     timer,
   ) async {
     try {
       final now = DateTime.now();
-
       final before = _onlineAnimals.length;
 
       _onlineAnimals.removeWhere((deviceId, lastSeen) {
         final elapsed = now.difference(lastSeen).inSeconds;
-
         return elapsed > 30;
       });
 
       final after = _onlineAnimals.length;
 
-      // --------------------------------------------------------
-      // LOG ONLINE ANIMAL COUNT
-      // --------------------------------------------------------
-
-      debugPrint('Online animals: $after');
-
-      // --------------------------------------------------------
-      // UPDATE FOREGROUND NOTIFICATION
-      // ONLY WHEN COUNT CHANGED
-      // --------------------------------------------------------
-
       if (after != before && service is AndroidServiceInstance) {
+        final text = after == 0
+            ? 'No animals online'
+            : (after == 1 ? '1 animal online' : '$after animals online');
         await service.setForegroundNotificationInfo(
           title: 'Livestock Tracker',
-          content: '$after animals online',
-        );
-
-        debugPrint(
-          'Foreground notification updated: '
-          '$after animals online',
+          content: text,
         );
       }
-    } catch (e, stackTrace) {
-      debugPrint('Cleanup timer error: $e');
-
-      debugPrint('$stackTrace');
-    }
+    } catch (_) {}
   });
 
   // ============================================================
@@ -283,7 +311,7 @@ void onStart(ServiceInstance service) async {
         // BATTERY
         // --------------------------------------------------------
 
-        final battery = (json['battery'] as num).toInt();
+        final battery = (json['battery'] as num).toDouble();
 
         // --------------------------------------------------------
         // LOW BATTERY NOTIFICATION
@@ -405,20 +433,29 @@ void onStart(ServiceInstance service) async {
         // SAVE LOCATION HISTORY
         // --------------------------------------------------------
 
-        await DatabaseHelper.instance.insertDashboardHistory(
+        final movement = (json['movement'] as num?)?.toInt() ?? 0;
+
+        final shouldSaveHistory = _shouldSaveHistory(
           animalId: animalId,
-          latitude: latitude,
-          longitude: longitude,
-          status: geofenceStatus,
-          battery: battery,
-          timestamp: timestamp,
-          geofenceId: geofenceId,
+          moving: movement == 1,
         );
 
-        debugPrint(
-          'Dashboard/history updated for '
-          '$animalId',
-        );
+        if (shouldSaveHistory) {
+          await DatabaseHelper.instance.insertDashboardHistory(
+            animalId: animalId,
+            latitude: latitude,
+            longitude: longitude,
+            status: geofenceStatus,
+            battery: battery,
+            timestamp: timestamp,
+            geofenceId: geofenceId,
+          );
+
+          debugPrint(
+            'History saved for $animalId '
+            '(${_reportingInterval.label})',
+          );
+        }
       } catch (e, stackTrace) {
         debugPrint('Error processing ESP message: $e');
 
@@ -438,22 +475,14 @@ void onStart(ServiceInstance service) async {
 Future<void> connectToEsp(WifiService wifi) async {
   while (!wifi.isConnected) {
     try {
-      debugPrint('Trying to connect to ESP...');
-
       final connected = await wifi.connect();
 
       if (connected) {
-        debugPrint('Connected to ESP8266');
-
+        debugPrint('Connected to ESP Base Station');
         return;
       }
-
-      debugPrint(
-        'ESP connection failed. '
-        'Retrying in 5 seconds...',
-      );
-    } catch (e) {
-      debugPrint('ESP connection error: $e');
+    } catch (_) {
+      // Quiet background polling without console log spam
     }
 
     await Future.delayed(const Duration(seconds: 5));

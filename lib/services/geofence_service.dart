@@ -1,16 +1,13 @@
 import 'dart:math';
+
 import 'package:latlong2/latlong.dart';
 
 class GeofenceUtils {
   static const double epsilon = 1e-10;
 
-  static bool isPointInsidePolygon(
-    LatLng point,
-    List<LatLng> polygon,
-  ) {
+  static bool isPointInsidePolygon(LatLng point, List<LatLng> polygon) {
     if (polygon.length < 3) return false;
 
-    // Boundary check
     for (int i = 0; i < polygon.length; i++) {
       final LatLng a = polygon[i];
       final LatLng b = polygon[(i + 1) % polygon.length];
@@ -21,23 +18,19 @@ class GeofenceUtils {
     }
 
     bool inside = false;
-
     int j = polygon.length - 1;
 
     for (int i = 0; i < polygon.length; i++) {
-      final xi = polygon[i].longitude;
-      final yi = polygon[i].latitude;
+      final double xi = polygon[i].longitude;
+      final double yi = polygon[i].latitude;
 
-      final xj = polygon[j].longitude;
-      final yj = polygon[j].latitude;
+      final double xj = polygon[j].longitude;
+      final double yj = polygon[j].latitude;
 
-      final intersect =
+      final bool intersect =
           ((yi > point.latitude) != (yj > point.latitude)) &&
           (point.longitude <
-              (xj - xi) *
-                      (point.latitude - yi) /
-                      (yj - yi) +
-                  xi);
+              (xj - xi) * (point.latitude - yi) / (yj - yi) + xi);
 
       if (intersect) {
         inside = !inside;
@@ -49,12 +42,8 @@ class GeofenceUtils {
     return inside;
   }
 
-  static bool _isPointOnSegment(
-    LatLng p,
-    LatLng a,
-    LatLng b,
-  ) {
-    final cross =
+  static bool _isPointOnSegment(LatLng p, LatLng a, LatLng b) {
+    final double cross =
         (p.latitude - a.latitude) * (b.longitude - a.longitude) -
         (p.longitude - a.longitude) * (b.latitude - a.latitude);
 
@@ -62,7 +51,7 @@ class GeofenceUtils {
       return false;
     }
 
-    final dot =
+    final double dot =
         (p.longitude - a.longitude) * (b.longitude - a.longitude) +
         (p.latitude - a.latitude) * (b.latitude - a.latitude);
 
@@ -70,9 +59,9 @@ class GeofenceUtils {
       return false;
     }
 
-    final squaredLength =
-        pow(b.longitude - a.longitude, 2) +
-        pow(b.latitude - a.latitude, 2);
+    final double squaredLength =
+        (pow(b.longitude - a.longitude, 2) + pow(b.latitude - a.latitude, 2))
+            .toDouble();
 
     return dot <= squaredLength;
   }

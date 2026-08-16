@@ -53,18 +53,34 @@ class TileCacheService {
     }
 
     final url = 'https://tile.openstreetmap.org/$zoom/$x/$y.png';
+    const headers = {
+      'User-Agent': 'LivestockTracker/1.0 (ACEM student project)',
+    };
 
-    try {
-      final response = await http.get(Uri.parse(url), headers: {'User-Agent': 'LivestockTracker/1.0 (ACEM student project)'});
+    // Retry up to 3 times with exponential backoff.
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final response = await http.get(Uri.parse(url), headers: headers);
 
-      if (response.statusCode != 200) return;
+        if (response.statusCode == 200) {
+          final file = await _tileFile(zoom: zoom, x: x, y: y);
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(response.bodyBytes);
+          return;
+        }
 
-      final file = await _tileFile(zoom: zoom, x: x, y: y);
+        if (response.statusCode == 429) {
+          // Rate limited — wait before retrying.
+          await Future.delayed(Duration(seconds: (attempt + 1) * 2));
+          continue;
+        }
 
-      await file.parent.create(recursive: true);
-      await file.writeAsBytes(response.bodyBytes);
-    } catch (_) {
-      // Ignore network errors.
+        // Other non-200 — don't retry.
+        return;
+      } catch (_) {
+        // Network error — wait then retry.
+        await Future.delayed(Duration(seconds: attempt + 1));
+      }
     }
   }
 
