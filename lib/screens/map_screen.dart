@@ -12,6 +12,7 @@ import '../database/database_helper.dart';
 import '../geofence/geofence.dart';
 import '../geofence/map_layers.dart';
 import '../models/download_progress.dart';
+import '../models/gps_data.dart';
 import '../providers/notification_provider.dart';
 import '../screens/alerts_screen.dart';
 import '../services/connectivity_service.dart';
@@ -19,12 +20,20 @@ import '../services/location_service.dart';
 import '../services/map_download_service.dart';
 import '../services/tile_cache_service.dart';
 import '../services/wifi_service.dart';
+import '../services/livestock_websocket_service.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/download_progress_dialog.dart';
 import '../widgets/geofence_panel.dart';
 
 class OnlineMapScreen extends ConsumerStatefulWidget {
-  const OnlineMapScreen({super.key});
+  final LatLng? initialCenter;
+  final String? targetAnimalId;
+
+  const OnlineMapScreen({
+    super.key,
+    this.initialCenter,
+    this.targetAnimalId,
+  });
 
   @override
   ConsumerState<OnlineMapScreen> createState() => _OnlineMapScreenState();
@@ -36,13 +45,12 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   final LocationService locationService = LocationService();
 
   StreamSubscription<Position>? positionStream;
-  Timer? _refreshTimer;
 
   final MapStateController mapState = MapStateController();
 
   String? tileDirectory;
 
-  bool isOnline = true;
+  bool hasInternet = true;
 
   final ConnectivityService connectivityService = ConnectivityService();
   final MapDownloadService downloader = MapDownloadService();
@@ -50,7 +58,22 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   final ValueNotifier<DownloadProgress?> progressNotifier =
       ValueNotifier<DownloadProgress?>(null);
 
+  // ---------------------------------------------------------------------------
+  // LIVESTOCK (LIVE, VIA WEBSOCKET)
+  // ---------------------------------------------------------------------------
+
   Map<String, LatLng> livestockLocations = {};
+  Map<String, GpsData> liveAnimals = {};
+
+  final LivestockWebSocketService esp = LivestockWebSocketService();
+  bool _espConnected = false;
+
+  StreamSubscription<GpsData>? _animalSubscription;
+  StreamSubscription<EspConnectionState>? _stateSubscription;
+
+  // ---------------------------------------------------------------------------
+  // WIFI / ROBOT (unrelated to livestock markers — left as-is)
+  // ---------------------------------------------------------------------------
 
   final WifiService wifi = WifiService();
 
@@ -64,36 +87,6 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
   // Number of unread notifications.
   int unreadAlerts = 0;
-
-  // ---------------------------------------------------------------------------
-  // LIVESTOCK LOCATION
-  // ---------------------------------------------------------------------------
-
-  Future<void> loadLivestockLocations() async {
-    final animals = await DatabaseHelper.instance.getDashboard();
-
-    if (!mounted) return;
-
-    setState(() {
-      livestockLocations.clear();
-
-      for (final animal in animals) {
-        final animalId = animal["Animal_ID"];
-
-        final latitude = animal["Latitude"];
-        final longitude = animal["Longitude"];
-
-        if (animalId == null || latitude == null || longitude == null) {
-          continue;
-        }
-
-        livestockLocations[animalId as String] = LatLng(
-          (latitude as num).toDouble(),
-          (longitude as num).toDouble(),
-        );
-      }
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // MAP LOCATION
@@ -122,17 +115,34 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
     loadTileDirectory();
     loadConnectivity();
-    loadLivestockLocations();
     connectWifi();
 
-    _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      loadLivestockLocations();
+    _espConnected = esp.isConnected;
+    esp.connect();
 
-      if (mounted && robotConnected != wifi.isConnected) {
-        setState(() {
-          robotConnected = wifi.isConnected;
-        });
-      }
+    // Live connection indicator.
+    _stateSubscription = esp.stateStream.listen((state) {
+      if (!mounted) return;
+
+      setState(() {
+        _espConnected = state == EspConnectionState.connected;
+      });
+    });
+
+    // Live markers — replaces the old 2-second database poll. Each packet
+    // updates (or adds) that animal's marker immediately.
+    _animalSubscription = esp.animalStream.listen((animal) {
+      if (!mounted) return;
+
+      setState(() {
+        liveAnimals[animal.deviceId] = animal;
+        livestockLocations[animal.deviceId] = LatLng(
+          animal.latitude,
+          animal.longitude,
+        );
+      });
+
+      _evaluateGeofenceBreach(animal);
     });
 
     listenToLocation();
@@ -142,6 +152,11 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
       if (!mounted) return;
 
+      if (widget.initialCenter != null) {
+        mapController.move(widget.initialCenter!, 17.0);
+      }
+
+      _evaluateAllAnimalsGeofence();
       setState(() {});
     });
 
@@ -149,10 +164,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
       if (!mounted) return;
 
       setState(() {
-        isOnline = connected;
+        hasInternet = connected;
       });
 
-      debugPrint('Internet Available: $connected');
+      debugPrint('WAN Internet Available: $connected');
     });
   }
 
@@ -175,7 +190,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> loadConnectivity() async {
-    isOnline = await connectivityService.isConnected();
+    hasInternet = await connectivityService.isConnected();
 
     if (mounted) {
       setState(() {});
@@ -185,6 +200,110 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   // ---------------------------------------------------------------------------
   // TILE DIRECTORY
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // GEOFENCE BREACH EVALUATION & ALERT POPUP
+  // ---------------------------------------------------------------------------
+
+  Set<String> breachedAnimals = {};
+
+  void _evaluateGeofenceBreach(GpsData animal) {
+    final polygon = geofence.points.isNotEmpty ? geofence.points : geofence.savedPoints;
+    if (polygon.length < 3) return;
+
+    final point = LatLng(animal.latitude, animal.longitude);
+    final isInside = geofence.containsPoint(point);
+    final statusString = isInside ? "Safe" : "Breached";
+
+    // Update SQLite database so Dashboard table reflects status
+    DatabaseHelper.instance.updateDashboard(
+      animalId: animal.deviceId,
+      latitude: animal.latitude,
+      longitude: animal.longitude,
+      status: statusString,
+      battery: animal.battery,
+      timestamp: animal.timestamp.toString(),
+    );
+
+    if (!isInside) {
+      if (!breachedAnimals.contains(animal.deviceId)) {
+        breachedAnimals.add(animal.deviceId);
+
+        // 1. Log notification & trigger local push
+        ref.read(notificationProvider.notifier).log(
+          LogEventType.boundaryBreached,
+          'GEOFENCE ALERT: Collar ${animal.deviceId} is OUTSIDE the boundary!',
+        );
+
+        // 2. Show alert popup modal overlay
+        _showBreachDialog(animal.deviceId, point);
+      }
+    } else {
+      breachedAnimals.remove(animal.deviceId);
+    }
+  }
+
+  void _evaluateAllAnimalsGeofence() {
+    for (final animal in liveAnimals.values) {
+      _evaluateGeofenceBreach(animal);
+    }
+  }
+
+  void _showBreachDialog(String animalId, LatLng location) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: Colors.red[50],
+          title: Row(
+            children: const [
+              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 32),
+              SizedBox(width: 10),
+              Text(
+                "GEOFENCE BREACH!",
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Collar $animalId has crossed OUTSIDE the designated geofence boundary!",
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              Text("Latitude: ${location.latitude.toStringAsFixed(5)}"),
+              Text("Longitude: ${location.longitude.toStringAsFixed(5)}"),
+            ],
+          ),
+          actions: [
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                mapController.move(location, 17.0);
+              },
+              icon: const Icon(Icons.my_location),
+              label: const Text("Locate on Map"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Dismiss"),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   Future<void> loadTileDirectory() async {
     tileDirectory = await TileCacheService.getTileDirectoryPath();
@@ -218,12 +337,16 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     positionStream?.cancel();
+    _animalSubscription?.cancel();
+    _stateSubscription?.cancel();
 
     progressNotifier.dispose();
     wifi.dispose();
 
+    // IMPORTANT:
+    // Do not dispose the singleton LivestockWebSocketService here.
+    // Other screens use the same service.
     super.dispose();
   }
 
@@ -283,6 +406,44 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
   }
 
   // ---------------------------------------------------------------------------
+  // BASE STATION CONNECTION BADGE (OVERLAID ON MAP)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildConnectionBadge() {
+    return Positioned(
+      top: 12,
+      left: 12,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black26)],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.circle,
+              size: 10,
+              color: _espConnected ? Colors.green : Colors.red,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              _espConnected ? 'Base Station Connected' : 'Base Station Offline',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _espConnected ? Colors.green[800] : Colors.red[800],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // BUILD
   // ---------------------------------------------------------------------------
 
@@ -336,11 +497,6 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
 
           setState(() {});
         },
-        // onDownloadTap: () {
-        //   setState(() {
-        //     downloadMode = true;
-        //   });
-        // },
       ),
 
       // -----------------------------------------------------------------------
@@ -368,7 +524,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
             // -----------------------------------------------------------------
             // SELECT MAP DOWNLOAD AREA
             // -----------------------------------------------------------------
-            if (isOnline) ...[
+            if (hasInternet) ...[
               const SizedBox(height: 12),
 
               FloatingActionButton(
@@ -498,18 +654,18 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
           FlutterMap(
             mapController: mapController,
             options: MapOptions(
-              initialCenter:
+              initialCenter: widget.initialCenter ??
                   mapState.currentLocation ?? const LatLng(27.7172, 85.3240),
-              initialZoom: 15,
-              minZoom: isOnline ? 1.0 : 15.0,
-              maxZoom: isOnline ? 21.0 : 19.0,
+              initialZoom: widget.initialCenter != null ? 17.0 : 15.0,
+              minZoom: hasInternet ? 1.0 : 15.0,
+              maxZoom: hasInternet ? 21.0 : 19.0,
             ),
 
             children: [
               // ---------------------------------------------------------------
               // ONLINE MAP
               // ---------------------------------------------------------------
-              if (isOnline)
+              if (hasInternet)
                 TileLayer(
                   urlTemplate:
                       'https://tile.openstreetmap.org/'
@@ -567,81 +723,154 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
               ),
 
               // ---------------------------------------------------------------
-              // LIVESTOCK MARKERS
+              // LIVESTOCK MARKERS (LIVE & BREACH STATUS)
               // ---------------------------------------------------------------
               MarkerLayer(
-                markers: livestockLocations.entries.map((entry) {
-                  return Marker(
-                    point: entry.value,
-
-                    width: 60,
-                    height: 60,
-
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-
-                      children: [
-                        // ---------------------------------------------------
-                        // ANIMAL MARKER
-                        // ---------------------------------------------------
-                        Container(
-                          width: 22,
-                          height: 22,
-
-                          decoration: BoxDecoration(
-                            color: Colors.blue,
-
-                            shape: BoxShape.circle,
-
-                            border: Border.all(color: Colors.white, width: 4),
-
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Colors.black38,
-                                blurRadius: 5,
-                                offset: Offset(0, 2),
+                markers: liveAnimals.isNotEmpty
+                    ? liveAnimals.entries.map((entry) {
+                        final animal = entry.value;
+                        final isMoving = animal.moving;
+                        final isBreached = breachedAnimals.contains(animal.deviceId);
+                        return Marker(
+                          point: LatLng(animal.latitude, animal.longitude),
+                          width: 90,
+                          height: 75,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: isBreached
+                                      ? Colors.red
+                                      : (isMoving ? Colors.green : Colors.blue),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 3),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black38,
+                                      blurRadius: 5,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  isBreached
+                                      ? Icons.warning_amber_rounded
+                                      : (isMoving ? Icons.directions_run : Icons.pets),
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: const [
+                                    BoxShadow(blurRadius: 3, color: Colors.black26),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      entry.key,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (isBreached) ...[
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        "BREACHED",
+                                        style: TextStyle(
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.w900,
+                                          color: Colors.red[800],
+                                        ),
+                                      ),
+                                    ] else if (isMoving) ...[
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        "MOVING",
+                                        style: TextStyle(
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.w900,
+                                          color: Colors.green[800],
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
                             ],
                           ),
-                        ),
-
-                        const SizedBox(height: 4),
-
-                        // ---------------------------------------------------
-                        // ANIMAL ID
-                        // ---------------------------------------------------
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-
-                            borderRadius: BorderRadius.circular(12),
-
-                            boxShadow: const [
-                              BoxShadow(blurRadius: 3, color: Colors.black26),
+                        );
+                      }).toList()
+                    : livestockLocations.entries.map((entry) {
+                        return Marker(
+                          point: entry.value,
+                          width: 60,
+                          height: 60,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  color: Colors.blue,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 4),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black38,
+                                      blurRadius: 5,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: const [
+                                    BoxShadow(blurRadius: 3, color: Colors.black26),
+                                  ],
+                                ),
+                                child: Text(
+                                  entry.key,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
-
-                          child: Text(
-                            entry.key,
-
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
+                        );
+                      }).toList(),
               ),
             ],
           ),
+
+          // -------------------------------------------------------------------
+          // BASE STATION CONNECTION BADGE
+          // -------------------------------------------------------------------
+          _buildConnectionBadge(),
 
           // -------------------------------------------------------------------
           // GEOFENCE PANEL
@@ -652,6 +881,8 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
             geofence: geofence,
 
             refresh: () {
+              breachedAnimals.clear();
+              _evaluateAllAnimalsGeofence();
               setState(() {});
             },
           ),
