@@ -1,31 +1,40 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../database/database_helper.dart';
 import '../services/wifi_service.dart';
+import '../providers/notification_provider.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
-  // Wi-Fi
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  // --------------------------------------------------------------------------
+  // WI-FI SERVICE
+  // --------------------------------------------------------------------------
+
   final WifiService wifi = WifiService();
 
   bool robotConnected = false;
   bool ledOn = false;
   bool _connecting = false;
 
-  // App Preferences
-  double defaultZoom = 15.0;
-  int minDownloadZoom = 15;
-  int maxDownloadZoom = 19;
+  // --------------------------------------------------------------------------
+  // INIT / DISPOSE
+  // --------------------------------------------------------------------------
 
   @override
   void initState() {
     super.initState();
-    connectWifi();
+
+    // Connect after the first frame so that the widget is fully initialized.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      connectWifi();
+    });
   }
 
   @override
@@ -39,16 +48,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // --------------------------------------------------------------------------
 
   Future<void> connectWifi() async {
-    setState(() => _connecting = true);
+    if (_connecting) return;
 
-    final connected = await wifi.connect();
+    if (mounted) {
+      setState(() {
+        _connecting = true;
+      });
+    }
 
-    if (!mounted) return;
+    try {
+      final connected = await wifi.connect();
 
-    setState(() {
-      robotConnected = connected;
-      _connecting = false;
-    });
+      if (!mounted) return;
+
+      setState(() {
+        robotConnected = connected;
+        _connecting = false;
+      });
+
+      if (!connected) {
+        _showSnackBar('Base station could not be reached', isError: true);
+      }
+    } catch (e) {
+      debugPrint('Wi-Fi connection error: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        robotConnected = false;
+        _connecting = false;
+      });
+
+      _showSnackBar('Failed to connect to base station', isError: true);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // LED CONTROL
+  // --------------------------------------------------------------------------
+
+  Future<void> toggleLed(bool value) async {
+    if (!robotConnected) return;
+
+    try {
+      final command = value ? 'LED_ON' : 'LED_OFF';
+
+      wifi.send(command);
+
+      if (!mounted) return;
+
+      setState(() {
+        ledOn = value;
+      });
+    } catch (e) {
+      debugPrint('LED command error: $e');
+
+      if (!mounted) return;
+
+      _showSnackBar('Failed to control LED', isError: true);
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -58,37 +116,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> clearHistory() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Clear History'),
-        content: const Text(
-          'This will permanently delete all livestock history records. Continue?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context, false);
-            },
-            child: const Text('Cancel'),
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Clear Alert History'),
+          content: const Text(
+            'This will permanently delete all alert history. '
+            'Continue?',
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context, true);
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirm != true) return;
 
-    await DatabaseHelper.instance.clearDashboardHistory();
+    try {
+      await DatabaseHelper.instance.clearLogs();
+      if (!mounted) return;
+      ref.read(notificationProvider.notifier).clearNotifications();
 
+      _showSnackBar('Alert history cleared successfully');
+    } catch (e) {
+      debugPrint('Clear history error: $e');
+
+      if (!mounted) return;
+
+      _showSnackBar('Failed to clear alert history', isError: true);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // SNACKBAR
+  // --------------------------------------------------------------------------
+
+  void _showSnackBar(String message, {bool isError = false}) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('History cleared successfully')),
-    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red : null,
+        ),
+      );
   }
 
   // --------------------------------------------------------------------------
@@ -104,9 +188,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
 
         children: [
-          // ====================================================================
+          // ==================================================================
           // BASE STATION
-          // ====================================================================
+          // ==================================================================
           const _SectionHeader(title: 'Base Station'),
 
           Card(
@@ -128,20 +212,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? const Text('Connecting...')
                       : Text(robotConnected ? 'Live' : 'Not reachable'),
 
-                  trailing: IconButton(
-                    icon: const Icon(Icons.refresh),
-
-                    tooltip: 'Reconnect',
-
-                    onPressed: _connecting ? null : connectWifi,
-                  ),
+                  trailing: _connecting
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.refresh),
+                          tooltip: 'Reconnect',
+                          onPressed: connectWifi,
+                        ),
                 ),
 
                 const Divider(height: 1),
 
+                // ============================================================
+                // LED BEACON
+                // ============================================================
                 SwitchListTile(
                   secondary: Icon(
-                    Icons.lightbulb,
+                    ledOn ? Icons.lightbulb : Icons.lightbulb_outline,
                     color: ledOn ? Colors.amber : Colors.grey,
                   ),
 
@@ -151,15 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   value: ledOn,
 
-                  onChanged: robotConnected
-                      ? (value) {
-                          wifi.send(value ? 'LED_ON' : 'LED_OFF');
-
-                          setState(() {
-                            ledOn = value;
-                          });
-                        }
-                      : null,
+                  onChanged: robotConnected ? toggleLed : null,
                 ),
               ],
             ),
@@ -167,117 +250,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // ====================================================================
-          // MAP PREFERENCES
-          // ====================================================================
-          const _SectionHeader(title: 'Map Preferences'),
-
-          Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.zoom_in),
-
-                  title: const Text('Default Zoom Level'),
-
-                  subtitle: Text(defaultZoom.toStringAsFixed(0)),
-
-                  trailing: SizedBox(
-                    width: 180,
-
-                    child: Slider(
-                      value: defaultZoom,
-
-                      min: 10,
-
-                      max: 19,
-
-                      divisions: 9,
-
-                      label: defaultZoom.toStringAsFixed(0),
-
-                      onChanged: (value) {
-                        setState(() {
-                          defaultZoom = value;
-                        });
-                      },
-                    ),
-                  ),
-                ),
-
-                const Divider(height: 1),
-
-                ListTile(
-                  leading: const Icon(Icons.download),
-
-                  title: const Text('Download Zoom Range'),
-
-                  subtitle: Text(
-                    'Min: $minDownloadZoom  →  '
-                    'Max: $maxDownloadZoom',
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-
-                  child: Row(
-                    children: [
-                      const Text('Min'),
-
-                      Expanded(
-                        child: Slider(
-                          value: minDownloadZoom.toDouble(),
-
-                          min: 10,
-
-                          max: 17,
-
-                          divisions: 7,
-
-                          label: '$minDownloadZoom',
-
-                          onChanged: (value) {
-                            setState(() {
-                              minDownloadZoom = value.toInt();
-                            });
-                          },
-                        ),
-                      ),
-
-                      const Text('Max'),
-
-                      Expanded(
-                        child: Slider(
-                          value: maxDownloadZoom.toDouble(),
-
-                          min: 17,
-
-                          max: 19,
-
-                          divisions: 2,
-
-                          label: '$maxDownloadZoom',
-
-                          onChanged: (value) {
-                            setState(() {
-                              maxDownloadZoom = value.toInt();
-                            });
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // ====================================================================
+          // ==================================================================
           // DATABASE MANAGEMENT
-          // ====================================================================
+          // ==================================================================
           const _SectionHeader(title: 'Database Management'),
 
           Card(
@@ -302,9 +277,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // ====================================================================
+          // ==================================================================
           // ABOUT
-          // ====================================================================
+          // ==================================================================
           const _SectionHeader(title: 'About'),
 
           const Card(
@@ -326,7 +301,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: Text('Institution'),
 
                   subtitle: Text(
-                    'Advanced College of Engineering and Management (ACEM)\n'
+                    'Advanced College of Engineering and '
+                    'Management (ACEM)\n'
                     'Tribhuvan University, Nepal',
                   ),
 

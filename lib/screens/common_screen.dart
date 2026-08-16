@@ -309,21 +309,21 @@ class _CommonScreenState extends ConsumerState<CommonScreen> {
     // -------------------------------------------------------------------------
     // NOTIFICATION LISTENER
     // -------------------------------------------------------------------------
-
     ref.listen<List<LogEvent>>(notificationProvider, (previous, next) {
       if (!mounted) return;
 
       final previousLength = previous?.length ?? 0;
+      final sessionStart = ref
+          .read(notificationProvider.notifier)
+          .sessionStartCount;
 
-      if (next.isNotEmpty && next.length != previousLength) {
+      if (next.length > previousLength && previousLength >= sessionStart) {
         final latestEvent = next.last;
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(latestEvent.message),
-
             behavior: SnackBarBehavior.floating,
-
             duration: const Duration(seconds: 3),
           ),
         );

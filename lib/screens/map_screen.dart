@@ -296,8 +296,11 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
       if (!mounted) return;
 
       final previousLength = previous?.length ?? 0;
+      final sessionStart = ref
+          .read(notificationProvider.notifier)
+          .sessionStartCount;
 
-      if (next.isNotEmpty && next.length != previousLength) {
+      if (next.length > previousLength && previousLength >= sessionStart) {
         final latestEvent = next.last;
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -444,17 +447,15 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                     bounds: mapState.selectedBounds!,
                     minZoom: 13,
                     maxZoom: 19,
-
                     onProgress: (progress) {
                       progressNotifier.value = progress;
                     },
                   );
 
-                  if (mounted) {
-                    Navigator.of(context).pop();
-                  }
+                  if (!context.mounted) return;
 
-                  if (!mounted) return;
+                  // Close the download progress dialog.
+                  Navigator.of(context).pop();
 
                   if (downloader.isCancelled) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -464,7 +465,7 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
-                          'Offline map downloaded successfully upto zoom level 19 ',
+                          'Offline map downloaded successfully up to zoom level 19',
                         ),
                       ),
                     );
@@ -473,10 +474,10 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
                         .read(notificationProvider.notifier)
                         .log(
                           LogEventType.mapDownloaded,
-                          'Offline map downloaded '
-                          '(zoom up to 19)',
+                          'Offline map downloaded (zoom up to 19)',
                         );
                   }
+
                   mapState.clearSelectedBounds();
                   downloadMode = false;
                   setState(() {});

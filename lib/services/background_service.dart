@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -105,13 +104,6 @@ void onStart(ServiceInstance service) async {
     service.setAsForegroundService();
 
     debugPrint('Foreground service requested');
-
-    await service.setForegroundNotificationInfo(
-      title: 'Livestock Tracker',
-      content: '0 animals online',
-    );
-
-    debugPrint('Foreground notification initialized');
   }
 
   // ------------------------------------------------------------
