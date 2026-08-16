@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database_helper.dart';
-import '../services/wifi_service.dart';
+import '../services/livestock_websocket_service.dart';
 import '../providers/notification_provider.dart';
 import 'alerts_screen.dart';
 import 'map_screen.dart';
@@ -18,7 +18,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<Map<String, Object?>> records = [];
   Timer? _refreshTimer;
 
-  final WifiService wifi = WifiService();
+  final LivestockWebSocketService esp = LivestockWebSocketService();
   bool robotConnected = false;
   bool _connecting = false;
 
@@ -30,9 +30,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       loadRecords();
-      if (mounted && robotConnected != wifi.isConnected) {
+      if (mounted && robotConnected != esp.isConnected) {
         setState(() {
-          robotConnected = wifi.isConnected;
+          robotConnected = esp.isConnected;
         });
       }
     });
@@ -48,7 +48,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> connectWifi() async {
     setState(() => _connecting = true);
-    final connected = await wifi.connect();
+    final connected = await esp.connect();
     if (!mounted) return;
     setState(() {
       robotConnected = connected;
@@ -59,7 +59,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    wifi.dispose();
+    esp.dispose();
     super.dispose();
   }
 
@@ -180,6 +180,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   icon: const Icon(Icons.map),
                   label: const Text("Open Map"),
                 ),
+
                 // TODO: wire this up once the exact buzzer command
                 // string is confirmed from the ESP8266 firmware source.
                 ElevatedButton.icon(

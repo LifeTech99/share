@@ -1,8 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../database/database_helper.dart';
-import '../services/wifi_service.dart';
+import '../services/livestock_websocket_service.dart';
 import '../providers/notification_provider.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -17,11 +19,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // WI-FI SERVICE
   // --------------------------------------------------------------------------
 
-  final WifiService wifi = WifiService();
+  final LivestockWebSocketService esp = LivestockWebSocketService();
 
   bool robotConnected = false;
   bool ledOn = false;
   bool _connecting = false;
+
+  // Pending-command flags so the UI can show "applying..." instead of
+  // instantly assuming success.
+  bool _intervalPending = false;
+  bool _ledPending = false;
+
+  StreamSubscription<EspConnectionState>? _stateSubscription;
+  StreamSubscription<String>? _ackSubscription;
+
+  // --------------------------------------------------------------------------
+  // COLLAR INTERVAL
+  // --------------------------------------------------------------------------
+
+  String selectedInterval = '1 minute';
 
   // --------------------------------------------------------------------------
   // INIT / DISPOSE
@@ -31,7 +47,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
 
-    // Connect after the first frame so that the widget is fully initialized.
+    // Read the singleton's current state immediately instead of assuming
+    // disconnected, and stay in sync with it going forward (Issue 3).
+    robotConnected = esp.isConnected;
+
+    _stateSubscription = esp.stateStream.listen((state) {
+      if (!mounted) return;
+
+      setState(() {
+        robotConnected = state == EspConnectionState.connected;
+      });
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       connectWifi();
     });
@@ -39,8 +66,159 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   void dispose() {
-    wifi.dispose();
+    _stateSubscription?.cancel();
+    _ackSubscription?.cancel();
     super.dispose();
+  }
+
+  // --------------------------------------------------------------------------
+  // ACK HELPER
+  // --------------------------------------------------------------------------
+  // Sends a command, then waits for the next ack message to arrive within
+  // [timeout]. Returns true if an ack showed up in time, false otherwise.
+  //
+  // NOTE: this currently treats *any* ack within the window as belonging to
+  // this command, since the base station handles one command at a time. If
+  // your firmware later echoes the command in the ack message, tighten this
+  // by checking `message.contains(expectedPrefix)` below.
+  Future<bool> _sendAndAwaitAck(
+    String command, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final completer = Completer<bool>();
+    late final StreamSubscription<String> sub;
+
+    sub = esp.ackStream.listen((message) {
+      if (!completer.isCompleted) {
+        completer.complete(true);
+      }
+    });
+
+    esp.send(command);
+
+    final timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.complete(false);
+      }
+    });
+
+    final result = await completer.future;
+
+    timer.cancel();
+    await sub.cancel();
+
+    return result;
+  }
+
+  // --------------------------------------------------------------------------
+  // COLLAR INTERVAL
+  // --------------------------------------------------------------------------
+
+  Future<void> setCollarInterval(String value) async {
+    if (!robotConnected) {
+      _showSnackBar('Base station is not connected', isError: true);
+      return;
+    }
+
+    if (_intervalPending) return;
+
+    String command;
+
+    switch (value) {
+      case '1 minute':
+        command = 'SET_INTERVAL:60000';
+        break;
+
+      case '5 minutes':
+        command = 'SET_INTERVAL:300000';
+        break;
+
+      case '30 minutes':
+        command = 'SET_INTERVAL:1800000';
+        break;
+
+      default:
+        return;
+    }
+
+    setState(() => _intervalPending = true);
+
+    try {
+      final acked = await _sendAndAwaitAck(command);
+
+      if (!mounted) return;
+
+      if (acked) {
+        setState(() {
+          selectedInterval = value;
+        });
+
+        _showSnackBar('Collar interval changed to $value');
+      } else {
+        _showSnackBar(
+          'Collar did not confirm the interval change',
+          isError: true,
+        );
+      }
+    } catch (e) {
+      debugPrint('Collar interval error: $e');
+
+      if (!mounted) return;
+
+      _showSnackBar('Failed to change collar interval', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _intervalPending = false);
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // INTERVAL DIALOG
+  // --------------------------------------------------------------------------
+
+  Future<void> _showIntervalDialog() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('Collar Data Interval'),
+          children: [
+            SimpleDialogOption(
+              onPressed: () {
+                Navigator.pop(dialogContext, '1 minute');
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('1 minute'),
+              ),
+            ),
+            SimpleDialogOption(
+              onPressed: () {
+                Navigator.pop(dialogContext, '5 minutes');
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('5 minutes'),
+              ),
+            ),
+            SimpleDialogOption(
+              onPressed: () {
+                Navigator.pop(dialogContext, '30 minutes');
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('30 minutes'),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (selected == null) return;
+
+    await setCollarInterval(selected);
   }
 
   // --------------------------------------------------------------------------
@@ -50,21 +228,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> connectWifi() async {
     if (_connecting) return;
 
-    if (mounted) {
-      setState(() {
-        _connecting = true;
-      });
-    }
+    setState(() => _connecting = true);
 
     try {
-      final connected = await wifi.connect();
+      final connected = await esp.connect();
 
       if (!mounted) return;
 
-      setState(() {
-        robotConnected = connected;
-        _connecting = false;
-      });
+      // robotConnected itself is now driven by _stateSubscription; we only
+      // need to manage the "connecting" flag and the failure snackbar here.
+      setState(() => _connecting = false);
 
       if (!connected) {
         _showSnackBar('Base station could not be reached', isError: true);
@@ -74,10 +247,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       if (!mounted) return;
 
-      setState(() {
-        robotConnected = false;
-        _connecting = false;
-      });
+      setState(() => _connecting = false);
 
       _showSnackBar('Failed to connect to base station', isError: true);
     }
@@ -88,24 +258,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // --------------------------------------------------------------------------
 
   Future<void> toggleLed(bool value) async {
-    if (!robotConnected) return;
+    if (!robotConnected || _ledPending) return;
+
+    setState(() => _ledPending = true);
 
     try {
       final command = value ? 'LED_ON' : 'LED_OFF';
 
-      wifi.send(command);
+      final acked = await _sendAndAwaitAck(command);
 
       if (!mounted) return;
 
-      setState(() {
-        ledOn = value;
-      });
+      if (acked) {
+        setState(() {
+          ledOn = value;
+        });
+      } else {
+        _showSnackBar('Collar did not confirm the LED change', isError: true);
+      }
     } catch (e) {
       debugPrint('LED command error: $e');
 
       if (!mounted) return;
 
       _showSnackBar('Failed to control LED', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _ledPending = false);
+      }
     }
   }
 
@@ -145,7 +325,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     try {
       await DatabaseHelper.instance.clearLogs();
+
       if (!mounted) return;
+
       ref.read(notificationProvider.notifier).clearNotifications();
 
       _showSnackBar('Alert history cleared successfully');
@@ -196,6 +378,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Card(
             child: Column(
               children: [
+                // ------------------------------------------------------------
+                // CONNECTION
+                // ------------------------------------------------------------
                 ListTile(
                   leading: Icon(
                     robotConnected ? Icons.wifi : Icons.wifi_off,
@@ -227,22 +412,68 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
                 const Divider(height: 1),
 
-                // ============================================================
+                // ------------------------------------------------------------
                 // LED BEACON
-                // ============================================================
+                // ------------------------------------------------------------
                 SwitchListTile(
-                  secondary: Icon(
-                    ledOn ? Icons.lightbulb : Icons.lightbulb_outline,
-                    color: ledOn ? Colors.amber : Colors.grey,
-                  ),
+                  secondary: _ledPending
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          ledOn ? Icons.lightbulb : Icons.lightbulb_outline,
+                          color: ledOn ? Colors.amber : Colors.grey,
+                        ),
 
                   title: const Text('LED Beacon'),
 
-                  subtitle: Text(ledOn ? 'On' : 'Off'),
+                  subtitle: Text(
+                    _ledPending ? 'Applying...' : (ledOn ? 'On' : 'Off'),
+                  ),
 
                   value: ledOn,
 
-                  onChanged: robotConnected ? toggleLed : null,
+                  onChanged: (robotConnected && !_ledPending)
+                      ? toggleLed
+                      : null,
+                ),
+
+                const Divider(height: 1),
+
+                // ------------------------------------------------------------
+                // COLLAR INTERVAL
+                // ------------------------------------------------------------
+                ListTile(
+                  leading: _intervalPending
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.access_time, color: Colors.blue),
+
+                  title: const Text('Collar Data Interval'),
+
+                  subtitle: Text(
+                    _intervalPending
+                        ? 'Applying...'
+                        : 'Send location every $selectedInterval',
+                  ),
+
+                  trailing: const Icon(Icons.chevron_right),
+
+                  onTap: (robotConnected && !_intervalPending)
+                      ? _showIntervalDialog
+                      : () {
+                          _showSnackBar(
+                            robotConnected
+                                ? 'Please wait for the current change to apply'
+                                : 'Base station is not connected',
+                            isError: true,
+                          );
+                        },
                 ),
               ],
             ),
