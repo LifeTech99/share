@@ -497,14 +497,12 @@ class _OnlineMapScreenState extends ConsumerState<OnlineMapScreen> {
           // -------------------------------------------------------------------
           FlutterMap(
             mapController: mapController,
-
             options: MapOptions(
               initialCenter:
                   mapState.currentLocation ?? const LatLng(27.7172, 85.3240),
-
               initialZoom: 15,
-
-              maxZoom: 19,
+              minZoom: isOnline ? 1.0 : 15.0,
+              maxZoom: isOnline ? 21.0 : 19.0,
             ),
 
             children: [
