@@ -19,84 +19,73 @@ class LocationScreen extends StatelessWidget {
     final location = LatLng(latitude, longitude);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(animalId),
-      ),
+      appBar: AppBar(title: Text(animalId)),
       body: FlutterMap(
         options: MapOptions(
           initialCenter: location,
           initialZoom: 17,
-          maxZoom: 17,
+          maxZoom: 21,
         ),
         children: [
           TileLayer(
-            urlTemplate:
-                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
             userAgentPackageName: "com.example.livestock_tracker",
           ),
 
-          
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: location,
+                width: 60,
+                height: 60,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Blue circular marker
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 4),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 5,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
 
-MarkerLayer(
-  markers: [
-    Marker(
-      point: location,
-      width: 60,
-      height: 60,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Blue circular marker
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: Colors.red,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white,
-                width: 4,
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black38,
-                  blurRadius: 5,
-                  offset: Offset(0, 2),
+                    const SizedBox(height: 4),
+
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [
+                          BoxShadow(blurRadius: 3, color: Colors.black26),
+                        ],
+                      ),
+                      child: Text(
+                        animalId,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 4),
-
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 6,
-              vertical: 2,
-            ),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(
-                  blurRadius: 3,
-                  color: Colors.black26,
-                ),
-              ],
-            ),
-            child: Text(
-              animalId,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    ),
-  ],
-),
         ],
       ),
     );

@@ -280,4 +280,14 @@ Future<List<Map<String, Object?>>> getDashboard() async {
       ''');
     }
   }
+
+  Future<void> clearDashboardHistory() async {
+    final db = await database;
+    await db.delete("dashboard_records");
+  }
+
+  Future<void> clearLogs() async {
+    final db = await database;
+    await db.delete("logs");
+  }
 }

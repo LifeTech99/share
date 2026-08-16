@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 
 import '../database/database_helper.dart';
 import '../services/background_service.dart';
@@ -25,6 +26,11 @@ class LogEvent {
 }
 
 class NotificationNotifier extends Notifier<List<LogEvent>> {
+  int sessionStartCount = 0;
+  void clearNotifications() {
+    state = [];
+  }
+
   @override
   List<LogEvent> build() {
     _loadLogs();
@@ -73,11 +79,12 @@ class NotificationNotifier extends Notifier<List<LogEvent>> {
         );
       }
 
+      sessionStartCount = loadedLogs.length;
       state = loadedLogs;
     } catch (e) {
       // Keep the provider alive even if the database
       // cannot be read.
-      print('Failed to load notification logs: $e');
+      debugPrint('Failed to load notification logs: $e');
     }
   }
 
@@ -98,7 +105,7 @@ class NotificationNotifier extends Notifier<List<LogEvent>> {
       // Show system/local notification.
       await BackgroundService.showAlert(title: _titleFor(type), body: message);
     } catch (e) {
-      print('Failed to save/show notification: $e');
+      debugPrint('Failed to save/show notification: $e');
     }
   }
 

@@ -1,19 +1,14 @@
 import 'package:flutter/material.dart';
 import '../screens/dashboard_screen.dart';
+import '../screens/home_screen.dart';
+import '../screens/map_screen.dart';
+import '../screens/settings_screen.dart';
+import '../screens/alerts_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   final VoidCallback onGeoFenceTap;
-  final bool robotConnected;
-  final bool ledOn;
-  final VoidCallback onLedPressed;
 
-  const AppDrawer({
-    super.key,
-    required this.onGeoFenceTap,
-    required this.robotConnected,
-    required this.ledOn,
-    required this.onLedPressed,
-  });
+  const AppDrawer({super.key, required this.onGeoFenceTap});
 
   @override
   Widget build(BuildContext context) {
@@ -21,66 +16,66 @@ class AppDrawer extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
+          // -------------------------------------------------------------------
+          // DRAWER HEADER
+          // -------------------------------------------------------------------
           SizedBox(
             height: 240,
             child: DrawerHeader(
-              decoration: BoxDecoration(color: Colors.green),
+              decoration: const BoxDecoration(color: Colors.green),
               margin: EdgeInsets.zero,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(Icons.pets, size: 60, color: Colors.white),
+
                   const SizedBox(height: 8),
+
                   const Text(
                     "Livestock Tracker",
                     style: TextStyle(color: Colors.white, fontSize: 22),
-                  ),
-
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          robotConnected ? Icons.wifi : Icons.wifi_off,
-                          color: robotConnected ? Colors.white : Colors.red,
-                        ),
-
-                        const SizedBox(width: 8),
-
-                        IconButton(
-                          constraints: const BoxConstraints(),
-                          padding: EdgeInsets.zero,
-                          icon: Icon(
-                            Icons.lightbulb,
-                            color: ledOn ? Colors.yellow : Colors.white,
-                          ),
-                          onPressed: robotConnected ? onLedPressed : null,
-                        ),
-                      ],
-                    ),
                   ),
                 ],
               ),
             ),
           ),
+
+          // -------------------------------------------------------------------
+          // HOME
+          // -------------------------------------------------------------------
           ListTile(
             leading: const Icon(Icons.home),
             title: const Text("Home"),
             onTap: () {
               Navigator.pop(context);
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HomeScreen()),
+              );
             },
           ),
 
+          // -------------------------------------------------------------------
+          // MAP
+          // -------------------------------------------------------------------
           ListTile(
             leading: const Icon(Icons.map),
             title: const Text("Map"),
             onTap: () {
               Navigator.pop(context);
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const OnlineMapScreen()),
+              );
             },
           ),
 
+          // -------------------------------------------------------------------
+          // GEO-FENCE
+          // -------------------------------------------------------------------
           ListTile(
             leading: const Icon(Icons.location_on),
             title: const Text("Geo-Fence"),
@@ -90,11 +85,15 @@ class AppDrawer extends StatelessWidget {
             },
           ),
 
+          // -------------------------------------------------------------------
+          // DASHBOARD
+          // -------------------------------------------------------------------
           ListTile(
             leading: const Icon(Icons.dashboard),
             title: const Text("Dashboard"),
             onTap: () {
               Navigator.pop(context);
+
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const DashboardScreen()),
@@ -102,11 +101,34 @@ class AppDrawer extends StatelessWidget {
             },
           ),
 
+          // -------------------------------------------------------------------
+          // ALERTS
+          // -------------------------------------------------------------------
+          ListTile(
+            leading: const Icon(Icons.notifications),
+            title: const Text("Alerts"),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AlertsScreen()),
+              );
+            },
+          ),
+
+          // -------------------------------------------------------------------
+          // SETTINGS
+          // -------------------------------------------------------------------
           ListTile(
             leading: const Icon(Icons.settings),
             title: const Text("Settings"),
             onTap: () {
               Navigator.pop(context);
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
             },
           ),
         ],

@@ -10,6 +10,7 @@ class MapLayers extends StatelessWidget {
   final LatLng? currentLocation;
   final LatLngBounds? selectedBounds;
   final VoidCallback refresh;
+  final ValueChanged<LatLngBounds> onBoundsChanged;
 
   const MapLayers({
     super.key,
@@ -17,6 +18,7 @@ class MapLayers extends StatelessWidget {
     required this.currentLocation,
     required this.selectedBounds,
     required this.refresh,
+    required this.onBoundsChanged,
   });
 
   @override
@@ -36,6 +38,105 @@ class MapLayers extends StatelessWidget {
                 color: Colors.blue.withValues(alpha: 0.25),
                 borderColor: Colors.blue,
                 borderStrokeWidth: 2,
+              ),
+            ],
+          ),
+        if (selectedBounds != null)
+          DragMarkers(
+            markers: [
+              DragMarker(
+                point: selectedBounds!.northWest,
+                size: const Size(40, 40),
+                builder: (context, position, isDragging) {
+                  return Center(
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                    ),
+                  );
+                },
+                onDragUpdate: (details, newPoint) {
+                  onBoundsChanged(
+                    LatLngBounds(newPoint, selectedBounds!.southEast),
+                  );
+                },
+              ),
+              DragMarker(
+                point: LatLng(selectedBounds!.north, selectedBounds!.east),
+                size: const Size(40, 40),
+                builder: (context, position, isDragging) {
+                  return Center(
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                    ),
+                  );
+                },
+                onDragUpdate: (details, newPoint) {
+                  onBoundsChanged(
+                    LatLngBounds(
+                      LatLng(newPoint.latitude, selectedBounds!.west),
+                      LatLng(selectedBounds!.south, newPoint.longitude),
+                    ),
+                  );
+                },
+              ),
+              DragMarker(
+                point: selectedBounds!.southEast,
+                size: const Size(40, 40),
+                builder: (context, position, isDragging) {
+                  return Center(
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                    ),
+                  );
+                },
+                onDragUpdate: (details, newPoint) {
+                  onBoundsChanged(
+                    LatLngBounds(selectedBounds!.northWest, newPoint),
+                  );
+                },
+              ),
+              DragMarker(
+                point: LatLng(selectedBounds!.south, selectedBounds!.west),
+                size: const Size(40, 40),
+                builder: (context, position, isDragging) {
+                  return Center(
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                    ),
+                  );
+                },
+                onDragUpdate: (details, newPoint) {
+                  onBoundsChanged(
+                    LatLngBounds(
+                      LatLng(selectedBounds!.north, newPoint.longitude),
+                      LatLng(newPoint.latitude, selectedBounds!.east),
+                    ),
+                  );
+                },
               ),
             ],
           ),
